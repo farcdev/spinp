@@ -1,0 +1,38 @@
+
+#ADDITIONAL_CFLAGS = -I/home/farci/devel/curl/include -DCURL_STATICLIB "c:/mingw/lib/libcurl.a" -lws2_32 -lz -std=gnu++11 -lpthread -lcurl -liconv -DSPINPLOG
+
+#GLIB_CFLAGS = -I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include -I/usr/include -I/usr/local/include/glib-2.0 -I/usr/local/lib/glib-2.0/include -I/usr/local/include
+
+#ADDITIONAL_CFLAGS = -std=gnu++11 -lpthread -lcurl -liconv -DSPINPLOG
+ADDITIONAL_CFLAGS = -I/mingw/include -DCURL_STATICLIB "c:/mingw/lib/libcurl.a" -lws2_32 -lz -std=gnu++11 -lpthread -lcurl -liconv -DSPINPLOG -lcrypt32
+LIBPURPLE_CFLAGS = -I/mingw/include/libpurple \
+			-DPURPLE_PLUGINS \
+			-DENABLE_NLS \
+			-lglib-2.0 \
+			-I/mingw/lib/glib-2.0/include \
+			-I/mingw/include/glib-2.0 \
+			-lpurple
+
+PRPL_NAME	= libspinp.dll
+
+SPINP_SOURCES = \
+	extern/convert/convert.cpp \
+	common.cpp \
+	connector.cpp \
+	cookie.cpp \
+	convert.cpp \
+	logger.cpp \
+	message.cpp \
+	http_request.cpp \
+	base_connector.cpp \
+	purple_connector.cpp \
+	libspinp.cpp \
+
+#SPINP_OBJ = $(SPINP_SOURCES:.c=.o)
+
+$(PRPL_NAME): $(SPINP_SOURCES)
+	g++ $(SPINP_SOURCES) -o libspinp.dll -shared ${ADDITIONAL_CFLAGS} ${LIBPURPLE_CFLAGS} -Wall -g
+
+install:
+	cp libspinp.so /home/flex/.purple/plugins/libspinp.so
+

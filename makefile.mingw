@@ -1,21 +1,38 @@
+PIDGIN_TREE_TOP := ../../..
+include $(PIDGIN_TREE_TOP)/libpurple/win32/global.mak
 
-#ADDITIONAL_CFLAGS = -I/home/farci/devel/curl/include -DCURL_STATICLIB "c:/mingw/lib/libcurl.a" -lws2_32 -lz -std=gnu++11 -lpthread -lcurl -liconv -DSPINPLOG
+TARGET = libspinp
+TYPE = PLUGIN
 
-#GLIB_CFLAGS = -I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include -I/usr/include -I/usr/local/include/glib-2.0 -I/usr/local/lib/glib-2.0/include -I/usr/local/include
+# Static or Plugin...
+ifeq ($(TYPE),STATIC)
+  DEFINES += -DSTATIC
+  DLL_INSTALL_DIR =	$(PURPLE_INSTALL_DIR)
+else
+ifeq ($(TYPE),PLUGIN)
+  DLL_INSTALL_DIR =	$(PURPLE_INSTALL_PLUGINS_DIR)
+endif
+endif
 
-#ADDITIONAL_CFLAGS = -std=gnu++11 -lpthread -lcurl -liconv -DSPINPLOG
-ADDITIONAL_CFLAGS = -I/mingw/include -DCURL_STATICLIB "c:/mingw/lib/libcurl.a" -lws2_32 -lz -std=gnu++11 -lpthread -lcurl -liconv -DSPINPLOG -lcrypt32
-LIBPURPLE_CFLAGS = -I/mingw/include/libpurple \
-			-DPURPLE_PLUGINS \
-			-DENABLE_NLS \
-			-lglib-2.0 \
-			-I/mingw/lib/glib-2.0/include \
-			-I/mingw/include/glib-2.0 \
-			-lpurple
+##
+## INCLUDE PATHS
+##
+INCLUDE_PATHS +=	-I. \
+			-I$(GTK_TOP)/include \
+			-I$(GTK_TOP)/include/glib-2.0 \
+			-I$(GTK_TOP)/lib/glib-2.0/include \
+			-I$(PURPLE_TOP) \
+			-I$(PURPLE_TOP)/win32 \
+			-I$(PIDGIN_TREE_TOP)
 
-PRPL_NAME	= libspinp.dll
+LIB_PATHS += -L. \
+			-L$(GTK_TOP)/lib \
+			-L$(PURPLE_TOP)
 
-SPINP_SOURCES = \
+##
+##  SOURCES, OBJECTS
+##
+C_SRC =	libspinp.cpp \
 	extern/convert/convert.cpp \
 	common.cpp \
 	connector.cpp \
@@ -25,14 +42,60 @@ SPINP_SOURCES = \
 	message.cpp \
 	http_request.cpp \
 	base_connector.cpp \
-	purple_connector.cpp \
-	libspinp.cpp \
+	purple_connector.cpp 
+	
 
-#SPINP_OBJ = $(SPINP_SOURCES:.c=.o)
+OBJECTS = $(C_SRC:%.c=%.o)
 
-$(PRPL_NAME): $(SPINP_SOURCES)
-	g++ $(SPINP_SOURCES) -o libspinp.dll -shared ${ADDITIONAL_CFLAGS} ${LIBPURPLE_CFLAGS} -Wall -g
+##
+## LIBRARIES
+##
+LIBS =	\
+			-lglib-2.0 \
+			-lintl \
+			-lpurple
+			
+MORESHIT = -DCURL_STATICLIB "c:/mingw/lib/libcurl.a" -lws2_32 -lz -std=gnu++11 -lpthread -lcurl -liconv -lcrypt32
+MORESHIT +=	-DPURPLE_PLUGINS \
+			-DENABLE_NLS \
+			-D_GLIBCXX_DEBUG \
+			-DSPINPLOG 
+			
 
-install:
-	cp libspinp.so /home/flex/.purple/plugins/libspinp.so
+#ifeq ($(CYRUS_SASL), 1)
+#INCLUDE_PATHS += -I$(CYRUS_SASL_TOP)/include
+#LIB_PATHS += -L$(CYRUS_SASL_TOP)/bin
+#LIBS += -llibsasl
+#endif
 
+include $(PIDGIN_COMMON_RULES)
+
+##
+## TARGET DEFINITIONS
+##
+.PHONY: all install clean
+
+all: $(TARGET).dll
+
+install: all $(DLL_INSTALL_DIR)
+	cp $(TARGET).dll $(DLL_INSTALL_DIR)
+
+$(OBJECTS): $(PURPLE_CONFIG_H)
+
+##
+## BUILD DLL
+##
+$(TARGET).dll: $(PURPLE_DLL).a $(OBJECTS)
+#	echo $(INCLUDE_PATHS)
+	g++ -shared $(OBJECTS) $(INCLUDE_PATHS) $(LIB_PATHS) $(LIBS) $(MORESHIT) -std=gnu++11 -o $(TARGET).dll -Wall -g 
+#	$(CC) -shared $(OBJECTS) $(LIB_PATHS) $(LIBS) $(DLL_LD_FLAGS) -o $(TARGET).dll
+
+##
+## CLEAN RULES
+##
+
+clean:
+	rm -f $(OBJECTS)
+	rm -f $(TARGET).dll
+
+include $(PIDGIN_COMMON_TARGETS) 

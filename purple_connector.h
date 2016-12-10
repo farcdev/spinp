@@ -67,10 +67,32 @@ private:
         time_t      m_timestamp;
     };
 
+    struct SIMSystemMessage
+    {
+        const char*   m_pUsername;
+        EIMSystemFlag m_flags;
+        time_t        m_timestamp;
+    };
+
+//    struct SIMStatusMessage
+//    {
+//        const char* m_pUsername;
+//        const char* m_pStatusMessage;
+//        time_t      m_timestamp;
+//    };
+
     struct SIMTyping
     {
         const char*       m_pUsername;
         PurpleTypingState m_typingState;
+    };
+
+    struct SImage
+    {
+        const char* m_pUsername;
+        void*       m_pImageData;
+        size_t      m_imageSize;
+        const char* m_pChecksum;
     };
 
 public:
@@ -89,33 +111,43 @@ public:
 
     PurpleConvIm* purpleGetConvIm(const char* _pUserName);
     PurpleConvChat* purpleCreateConvChat(const char* _pRoomName);
-    PurpleConvChat* purpleGetConvChat(const char * _pRoomName);
+    PurpleConvChat* purpleGetConvChat(const char* _pRoomName);
     PurpleConvChat* purpleGetConvChat(int _id);
     void            purpleRemoveConvChat(int _id);
 
     void purpleOnLoop();
 
 private:
+    // System, Misc
     void purpleChangeConnectionState();
-    void purpleRefreshBuddyList();
-    void purpleChangeBuddyState();
-    void purplePushChat();
-    void purplePushChatMessages();
-    void purplePushIMMessages();
-    void purplePushTypingStates();
-    void purpleChangeChatUserStates();
-
+    void purpleSetBuddyImages();
     void purplePushChatRoomList();
+    void purplePushUserProfiles();
 
+    // BuddyList
+    void purpleBuddyListRefresh();
+    void purpleBuddyListChangeBuddyStates();
+    void purpleBuddyListChangeBuddyState(SBuddyState* _pBuddyState);
+
+    // ChatRooms
+    void purpleChatPushChat();
+    void purpleChatPushMessages();
+    void purpleChatChangeUserStates();
+
+    // InstantMessages
+    void purpleIMPushMessages();
+    void purpleIMPushTypingStates();
+    void purpleIMSetSystemMessages();
+
+    // Logs
     void purplePushLogs();
     const std::string& purpleFindLogCategory(uint16_t _threadId, int16_t _categoryId);
-
-    void purpleSetBuddyState(SBuddyState* _pBuddyState);
-
 
 public:
     void purpleSetRoomList(void* _pRoomList);
     void* purpleGetRoomList();
+
+    void purpleOnIMConversationCreated(PurpleConversation* _pConversation);
 
 
 public:
@@ -126,6 +158,9 @@ public:
 
     virtual void buddyListRefresh(std::vector<SBuddyState>& _rBuddies);
     virtual void buddyStateChange(SBuddyState* _pBuddy);
+    virtual void buddyAddImage(const char* _pUsername, void* _pImageData, size_t _imageSize, const char* _pChecksum);
+    virtual void buddySetProfile(const char* _pUserName, const TUserProfile& _rInfos);
+    virtual void buddySetProfile(const char* _pUserName, TUserProfile&& _rrInfos);
 //    virtual void buddyList(SBuddyState* _pBuddies, size_t _numberOfBuddies);
 //    virtual void buddyAdd();
 //    virtual void buddyRemoved();
@@ -134,6 +169,7 @@ public:
 //    virtual void imClose();
     virtual void imSetTypingState(const char* _pUserName, ETypingState _state);
     virtual void imAddMessage(const char* _pUsername, char _type, const char* _pMessage);
+    virtual void imAddStatusMessage(const char* _pUsername, EIMSystemFlag _flags);
 
     virtual void chatSetList(std::vector<SRoom>& _rRooms);
     virtual void chatUserStateChange(const SChatUserState* _pUserStates, size_t _numberOfUserStates);
@@ -150,18 +186,28 @@ private:
     std::map<int, std::string> m_idSpinIdMap;
     std::map<std::string, int> m_spinIdIdMap;
 
-    std::mutex                  m_mutex;
-    EConnectionState            m_connectionState;
-    std::vector<SChatMessage>   m_chatMessages;
-    std::vector<SChatUserState> m_chatUserStates;
-    std::vector<SIMMessage>     m_imMessages;
-    std::vector<SIMTyping>      m_imTyping;
-    std::vector<std::string>    m_chatJoin;
-    std::vector<std::string>    m_chatLeave;
-    std::vector<SBuddyState>    m_buddyStates;
-    std::vector<SRoom>          m_rooms;
-    std::vector<SBuddyState>    m_buddyListStates;
-    Spin::CLogger::TMessageList m_logMessages;
+    std::mutex m_mutex;
+
+    EConnectionState m_connectionState;
+
+    std::vector<SBuddyState>      m_buddyListStates;
+    std::vector<SImage>           m_images;
+    std::vector<SRoom>            m_rooms;
+
+    std::vector<SChatMessage>     m_chatMessages;
+    std::vector<SChatUserState>   m_chatUserStates;
+    std::vector<SBuddyState>      m_buddyStates;
+    std::vector<std::string>      m_chatJoin;
+    std::vector<std::string>      m_chatLeave;
+
+    std::vector<SIMMessage>       m_imMessages;
+    std::vector<SIMTyping>        m_imTyping;
+    std::vector<SIMSystemMessage> m_imChatBuddyFlags;
+
+    typedef std::vector<std::pair<std::string, TUserProfile>> TUserProfiles;
+    TUserProfiles m_userProfiles;
+
+    Spin::CLogger::TMessageList         m_logMessages;
     Spin::CLogger::TThreadIdCategoryMap m_logCategories;
 
     void*                       m_pPurpleRoomList;
@@ -173,6 +219,11 @@ private:
     const char* c_pStrIdleKick     = "idlekick";
     const char* c_pStrDisconnected = "disconnected";
     const char* c_pStrLogout       = "logout";
+
+    const char* c_pStrIMSystemMessageUnregistered = "unregistered user";
+    const char* c_pStrIMSystemMessageBlocked      = "blocked by user";
+    const char* c_pStrIMSystemMessageOffline      = "offline";
+
     const std::string c_undefinedCategory = "undefined_category";
 
 private:

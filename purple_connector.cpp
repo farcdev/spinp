@@ -17,7 +17,7 @@
  */
 
 #include "purple_connector.h"
-#include "message.h"
+#include "connector.h"
 #include "common.h"
 
 #ifdef CMAKE
@@ -46,12 +46,16 @@ void purpleUserAuthAcceptBuddyCallback(void* _pData)
 {
     SCBInfo* pCBInfo = reinterpret_cast<SCBInfo*>(_pData);
 
-    Spin::Job::SAuthAcceptBuddy* pAcceptBuddy = new Spin::Job::SAuthAcceptBuddy();
-    pAcceptBuddy->m_userName = pCBInfo->m_pName;
+    Spin::Job::SAuthAcceptBuddy acceptBuddy;
+    acceptBuddy.m_userName = std::move(pCBInfo->m_pName);
+//    Spin::Job::SAuthAcceptBuddy* pAcceptBuddy = new Spin::Job::SAuthAcceptBuddy();
+//    pAcceptBuddy->m_userName = pCBInfo->m_pName;
 
-    std::cout << pAcceptBuddy->m_userName << std::endl;
+//    std::cout << pAcceptBuddy->m_userName << std::endl;
+    std::cout << acceptBuddy.m_userName << std::endl;
 
-    Spin::pushJob(pCBInfo->m_pConnector, pAcceptBuddy);
+//    Spin::pushJob(pCBInfo->m_pConnector, acceptBuddy)
+    pCBInfo->m_pConnector->pushJob(std::move(acceptBuddy));
 
     delete pCBInfo;
 }
@@ -60,10 +64,16 @@ void purpleUserAuthDeclineBuddyCallback(void* _pData)
 {
     SCBInfo* pCBInfo = reinterpret_cast<SCBInfo*>(_pData);
 
-    Spin::Job::SAuthDeclineBuddy* pDeclineBuddy = new Spin::Job::SAuthDeclineBuddy();
-    pDeclineBuddy->m_userName = pCBInfo->m_pName;
+//    Spin::Job::SAuthDeclineBuddy* pDeclineBuddy = new Spin::Job::SAuthDeclineBuddy();
+//    pDeclineBuddy->m_userName = pCBInfo->m_pName;
+//
+//    Spin::pushJob(pCBInfo->m_pConnector, pDeclineBuddy);
 
-    Spin::pushJob(pCBInfo->m_pConnector, pDeclineBuddy);
+    Spin::Job::SAuthDeclineBuddy declineBuddy;
+    declineBuddy.m_userName = std::move(pCBInfo->m_pName);
+
+//    Spin::pushJob(pCBInfo->m_pConnector, declineBuddy);
+    pCBInfo->m_pConnector->pushJob(std::move(declineBuddy));
 
     delete pCBInfo;
 }
@@ -82,14 +92,18 @@ CPurpleConnector::CPurpleConnector()
     , m_spinIdIdMap      ()
     , m_mutex            ()
     , m_connectionState  ()
+    , m_buddyListStates  ()
+    , m_images           ()
+    , m_rooms            ()
     , m_chatMessages     ()
     , m_chatUserStates   ()
-    , m_imMessages       ()
-    , m_imTyping         ()
+    , m_buddyStates      ()
     , m_chatJoin         ()
     , m_chatLeave        ()
-    , m_buddyStates      ()
-    , m_rooms            ()
+    , m_imMessages       ()
+    , m_imTyping         ()
+    , m_imChatBuddyFlags ()
+    , m_userProfiles     ()
     , m_logMessages      ()
     , m_pPurpleRoomList  (nullptr)
     , m_currentId        (0)
@@ -157,37 +171,38 @@ void CPurpleConnector::buddyStateChange(SBuddyState* _pBuddy)
     m_buddyStates.push_back({ _pBuddy->m_id, name, _pBuddy->m_flags });
 }
 
-//void CPurpleConnector::buddyList(SBuddyState* _pBuddies, size_t _numberOfBuddies)
-//{
-//    for (size_t index = 0; index < _numberOfBuddies; ++ index)
-//    {
-//        char* pBuddyName = new char[strlen(_pBuddies[index].m_pName) + 1];
-//
-//        strcpy(pBuddyName, _pBuddies->m_pName);
-//
-//        m_buddyStates.push_back({ pBuddyName, _pBuddies[index].m_flags});
-//    }
-//}
+void CPurpleConnector::buddyAddImage(const char* _pUsername, void* _pImageData, size_t _imageSizeInBytes, const char* _pChecksum)
+{
+    char* pUsername = new char[strlen(_pUsername) + 1];
+    strcpy(pUsername, _pUsername);
 
-//void CPurpleConnector::buddyAdd()
-//{
-//
-//}
-//
-//void CPurpleConnector::buddyRemoved()
-//{
-//
-//}
-//
-//void CPurpleConnector::imOpen()
-//{
-//
-//}
-//
-//void CPurpleConnector::imClose()
-//{
-//
-//}
+    void* pImageData = new char[_imageSizeInBytes];
+    memcpy(pImageData, _pImageData, _imageSizeInBytes);
+
+    char* pChecksum = new char[strlen(_pChecksum) + 1];
+    strcpy(pChecksum, _pChecksum);
+
+    m_images.push_back(
+        {
+            pUsername,
+            pImageData,
+            _imageSizeInBytes,
+            pChecksum
+        }
+    );
+}
+
+void CPurpleConnector::buddySetProfile(const char* _pUserName, const TUserProfile& _rInfos)
+{
+    TUserProfile copyOfInfos = _rInfos;
+
+    m_userProfiles.emplace_back(std::make_pair(_pUserName, copyOfInfos));
+}
+
+void CPurpleConnector::buddySetProfile(const char* _pUserName, TUserProfile&& _rrInfos)
+{
+    m_userProfiles.emplace_back(std::make_pair(_pUserName, std::move(_rrInfos)));
+}
 
 void CPurpleConnector::chatAddMessage(const char* _pRoomName, const char* _pUsername, char _type, const char* _pMessage)
 {
@@ -223,6 +238,23 @@ void CPurpleConnector::imAddMessage(const char* _pUsername, char _type, const ch
     m_imMessages.push_back({
         pString,
         &pString[usernameLength + 1],
+        time(0)
+    });
+}
+
+void CPurpleConnector::imAddStatusMessage(const char* _pUsername, EIMSystemFlag _flags)
+{
+    size_t usernameLength = strlen(_pUsername);
+
+    char* pString = new char[usernameLength + 1];
+    strcpy(pString, _pUsername);
+
+    std::cout << "imADDStatusMessage: " << _pUsername << " " << pString << std::endl;
+    std::cout << "imADDStatusMessage: " << _pUsername << " " << pString << std::endl;
+
+    m_imChatBuddyFlags.push_back({
+        pString,
+        _flags,
         time(0)
     });
 }
@@ -305,14 +337,14 @@ void CPurpleConnector::chatJoin(const char* _pRoomName, const char* _pSpinId)
     m_idSpinIdMap.emplace(std::pair<int, std::string>(m_currentId, spinId));
     m_spinIdIdMap.emplace(std::pair<std::string, int>(spinId, m_currentId));
 
-    m_chatJoin.push_back(_pRoomName);
+    m_chatJoin.push_back(std::string(_pRoomName));
 
     ++ m_currentId;
 }
 
 void CPurpleConnector::chatLeave(const char* _pRoomName, const SChatUserState* _pType)
 {
-    m_chatLeave.push_back(_pRoomName);
+    m_chatLeave.push_back(std::string(_pRoomName));
 }
 
 void CPurpleConnector::purpleOnLoop()
@@ -320,15 +352,19 @@ void CPurpleConnector::purpleOnLoop()
     if (m_mutex.try_lock())
     {
         purpleChangeConnectionState();
-        purpleRefreshBuddyList();
-        purpleChangeBuddyState();
+        purpleBuddyListRefresh();
+        purpleBuddyListChangeBuddyStates();
+        purplePushUserProfiles();
 
-        purplePushTypingStates();
-        purplePushIMMessages();
+        purpleIMSetSystemMessages();
+        purpleIMPushTypingStates();
+        purpleIMPushMessages();
 
-        purplePushChat();
-        purplePushChatMessages();
-        purpleChangeChatUserStates();
+        purpleChatPushChat();
+        purpleChatPushMessages();
+        purpleChatChangeUserStates();
+
+        purpleSetBuddyImages();
 
         if (m_rooms.size() > 0) purplePushChatRoomList();
 
@@ -336,24 +372,6 @@ void CPurpleConnector::purpleOnLoop()
 
         m_mutex.unlock();
     }
-//    m_mutex.lock();
-//
-//    purpleChangeConnectionState();
-//    purpleRefreshBuddyList();
-//    purpleChangeBuddyState();
-//
-//    purplePushTypingStates();
-//    purplePushIMMessages();
-//
-//    purplePushChat();
-//    purplePushChatMessages();
-//    purpleChangeChatUserStates();
-//
-//    if (m_rooms.size() > 0) purplePushChatRoomList();
-//
-//    purplePushLogs();
-//
-//    m_mutex.unlock();
 }
 
 void CPurpleConnector::purpleChangeConnectionState()
@@ -376,7 +394,7 @@ void CPurpleConnector::purpleChangeConnectionState()
     }
 }
 
-void CPurpleConnector::purpleRefreshBuddyList()
+void CPurpleConnector::purpleBuddyListRefresh()
 {
     PurpleAccount* pAccount = purple_connection_get_account(m_pPurpleConnection);
 
@@ -387,7 +405,7 @@ void CPurpleConnector::purpleRefreshBuddyList()
     auto end = m_buddyListStates.cend();
     for (auto current = m_buddyListStates.begin(); current != end; ++ current)
     {
-        purpleSetBuddyState(&*current);
+        purpleBuddyListChangeBuddyState(&*current);
     }
 
     if (m_buddyListStates.size() > 0)
@@ -435,18 +453,18 @@ void CPurpleConnector::purpleRefreshBuddyList()
     }
 }
 
-void CPurpleConnector::purpleChangeBuddyState()
+void CPurpleConnector::purpleBuddyListChangeBuddyStates()
 {
     auto end = m_buddyStates.cend();
     for (auto current = m_buddyStates.begin(); current != end; ++ current)
     {
-        purpleSetBuddyState(&*current);
+        purpleBuddyListChangeBuddyState(&*current);
     }
 
     m_buddyStates.clear();
 }
 
-void CPurpleConnector::purpleSetBuddyState(SBuddyState* _pBuddyState)
+void CPurpleConnector::purpleBuddyListChangeBuddyState(SBuddyState* _pBuddyState)
 {
     PurpleAccount* pAccount = purple_connection_get_account(m_pPurpleConnection);
     PurpleBuddy*   pBuddy   = NULL;
@@ -542,7 +560,7 @@ void CPurpleConnector::purpleSetBuddyState(SBuddyState* _pBuddyState)
     pBuddyData->m_hasAuthorizedAccount = true;
 }
 
-void CPurpleConnector::purplePushChat()
+void CPurpleConnector::purpleChatPushChat()
 {
     auto end = m_chatJoin.cend();
 
@@ -582,7 +600,7 @@ void CPurpleConnector::purplePushChat()
     m_chatLeave.clear();
 }
 
-void CPurpleConnector::purplePushChatMessages()
+void CPurpleConnector::purpleChatPushMessages()
 {
     auto end = m_chatMessages.cend();
 
@@ -628,11 +646,13 @@ PurpleConvIm* CPurpleConnector::purpleGetConvIm(const char* _pUserName)
 
     if (pConversation == NULL)
     {
+        Log::info("im_sys") << "creating conversation for user '" << _pUserName << "'" << Log::end;
+
         pConversation = purple_conversation_new(PURPLE_CONV_TYPE_IM, m_pPurpleConnection->account, _pUserName);
 
         if (pConversation == NULL)
         {
-            Log::error("im_sys") << "weren't able to initiate converation with '" << _pUserName << "'" << Log::end;
+            Log::fatal("im_sys") << "weren't able to initiate converation with '" << _pUserName << "'" << Log::end;
             return NULL;
         }
     }
@@ -741,7 +761,7 @@ void CPurpleConnector::purpleRemoveConvChat(int _id)
     purple_conversation_destroy(purple_conv_chat_get_conversation(pConvChat));
 }
 
-void CPurpleConnector::purplePushIMMessages()
+void CPurpleConnector::purpleIMPushMessages()
 {
     auto end = m_imMessages.cend();
 
@@ -771,7 +791,7 @@ void CPurpleConnector::purplePushIMMessages()
     m_imMessages.clear();
 }
 
-void CPurpleConnector::purplePushTypingStates()
+void CPurpleConnector::purpleIMPushTypingStates()
 {
     auto end = m_imTyping.cend();
 
@@ -794,7 +814,46 @@ void CPurpleConnector::purplePushTypingStates()
     m_imTyping.clear();
 }
 
-void CPurpleConnector::purpleChangeChatUserStates()
+void CPurpleConnector::purpleIMSetSystemMessages()
+{
+    auto end = m_imChatBuddyFlags.cend();
+
+    for (auto current = m_imChatBuddyFlags.begin(); current != end; ++ current)
+    {
+        SIMSystemMessage& rIMSystemMessage = *current;
+
+        PurpleConvIm* pConvIm = purpleGetConvIm(rIMSystemMessage.m_pUsername);
+
+        if (pConvIm == NULL)
+        {
+            continue;
+        }
+
+        const char* pMessage = nullptr;
+
+        switch (rIMSystemMessage.m_flags)
+        {
+            case IMSystemFlag_DoesNotAcceptIM: pMessage = c_pStrIMSystemMessageBlocked     ; break;
+            case IMSystemFlag_NotRegistered  : pMessage = c_pStrIMSystemMessageUnregistered; break;
+            case IMSystemFlag_Offline        : pMessage = c_pStrIMSystemMessageOffline     ; break;
+            default                          : pMessage = c_pStrUnknown                    ; break;
+        }
+
+        purple_conv_im_write(
+            pConvIm,
+            rIMSystemMessage.m_pUsername,
+            pMessage,
+            PURPLE_MESSAGE_SYSTEM,
+            rIMSystemMessage.m_timestamp
+        );
+
+        delete[] rIMSystemMessage.m_pUsername;
+    }
+
+    m_imChatBuddyFlags.clear();
+}
+
+void CPurpleConnector::purpleChatChangeUserStates()
 {
     PurpleConvChatBuddyFlags flags;
     PurpleConvChat* pConvChat;
@@ -803,8 +862,6 @@ void CPurpleConnector::purpleChangeChatUserStates()
     for (auto current = m_chatUserStates.begin(); current != end; ++ current)
     {
         SChatUserState& rState = *current;
-
-        pConvChat = NULL;
 
 //        PURPLE_CBFLAGS_NONE          = 0x0000, /**< No flags                     */
 //        PURPLE_CBFLAGS_VOICE         = 0x0001, /**< Voiced user or "Participant" */
@@ -819,7 +876,7 @@ void CPurpleConnector::purpleChangeChatUserStates()
 
         if (pConvChat == NULL)
         {
-            purple_debug_error(m_pPluginId, "couldn't retrieve convchat in purpleChangeChatUserStates with name: %s \n", rState.m_pRoomName);
+            purple_debug_error(m_pPluginId, "couldn't retrieve convchat in purpleChatChangeUserStates with name: %s \n", rState.m_pRoomName);
             continue;
         }
 
@@ -877,6 +934,33 @@ void CPurpleConnector::purpleChangeChatUserStates()
     }
 
     m_chatUserStates.clear();
+}
+
+void CPurpleConnector::purpleSetBuddyImages()
+{
+    std::vector<SImage>::const_iterator endOfImages = m_images.cend();
+    for (std::vector<SImage>::iterator currentImage = m_images.begin(); currentImage != endOfImages; ++ currentImage)
+    {
+        purple_buddy_icon_new(
+            purple_connection_get_account(m_pPurpleConnection),
+            currentImage->m_pUsername,
+            currentImage->m_pImageData,
+            currentImage->m_imageSize,
+            currentImage->m_pChecksum
+        );
+//        purple_buddy_icons_set_for_user(
+//            purple_connection_get_account(m_pPurpleConnection),
+//            currentImage->m_pUsername,
+//            currentImage->m_pImageData,
+//            currentImage->m_imageSize,
+//            NULL
+//        );
+
+        delete[] reinterpret_cast<char*>(currentImage->m_pImageData);
+        delete[] currentImage->m_pUsername;
+    }
+
+    m_images.clear();
 }
 
 void CPurpleConnector::purplePushChatRoomList()
@@ -940,6 +1024,42 @@ void CPurpleConnector::purplePushChatRoomList()
     purple_roomlist_set_in_progress(pRoomList, FALSE);
 
     m_rooms.clear();
+}
+
+void CPurpleConnector::purplePushUserProfiles()
+{
+    TUserProfiles::const_iterator endOfProfiles = m_userProfiles.cend();
+    for (TUserProfiles::const_iterator currentProfile = m_userProfiles.cbegin(); currentProfile != endOfProfiles; ++ currentProfile)
+    {
+        PurpleNotifyUserInfo* pNotifyUserInfo = purple_notify_user_info_new();
+
+        const char* pUserName = currentProfile->first.c_str();
+        const TUserProfile& rProfile = currentProfile->second;
+
+        TUserProfile::const_iterator endOfEntries = rProfile.cend();
+        for (TUserProfile::const_iterator currentEntry = rProfile.cbegin(); currentEntry != endOfEntries; ++ currentEntry)
+        {
+            switch (currentEntry->getType())
+            {
+                case Spin::CUserProfileEntry::UserInfoType_Headline:
+                    purple_notify_user_info_add_section_header(pNotifyUserInfo, currentEntry->getHeadline().c_str());
+                    break;
+                case Spin::CUserProfileEntry::UserInfoType_Line:
+                    purple_notify_user_info_add_section_break(pNotifyUserInfo);
+                    break;
+                case Spin::CUserProfileEntry::UserInfoType_Pair:
+                    purple_notify_user_info_add_pair(pNotifyUserInfo, currentEntry->getFirst().c_str(), currentEntry->getSecond().c_str());
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // FIXME might be freed on close?!?
+        purple_notify_userinfo(m_pPurpleConnection, pUserName, pNotifyUserInfo, NULL, NULL);
+    }
+
+    m_userProfiles.clear();
 }
 
 void CPurpleConnector::purplePushLogs()
@@ -1025,6 +1145,45 @@ void CPurpleConnector::purpleSetRoomList(void* _pRoomList)
 void* CPurpleConnector::purpleGetRoomList()
 {
     return m_pPurpleRoomList;
+}
+
+void CPurpleConnector::purpleOnIMConversationCreated(PurpleConversation* _pConversation)
+{
+    CConnector* pConnector = getConnector();
+    const char* pUserName = purple_conversation_get_name(_pConversation);
+    const char* pHash     = NULL;
+
+    Spin::Message::SIMInit imInit;
+    imInit.m_userName = pUserName;
+    pConnector->pushOut(imInit);
+
+//        PurpleBuddyIcon* pBuddyIcon = purple_buddy_icons_find(purple_conversation_get_account(_pConversation), pUserName);
+
+//        if (pBuddyIcon != NULL)
+//            pHash = purple_buddy_icon_get_checksum(pBuddyIcon);
+
+//        purple_buddy_icons_get_checksum_for_user()
+
+    Spin::Job::SUpdateUserInfo updateUserInfo;
+
+    PurpleBuddy* pBuddy = purple_find_buddy(purple_conversation_get_account(_pConversation), pUserName);
+    if (pBuddy != NULL)
+    {
+        updateUserInfo.m_isBuddy = true;
+        PurpleBuddyIcon* pBuddyIcon = purple_buddy_get_icon(pBuddy);
+
+        if (pBuddyIcon != NULL)
+            pHash = purple_buddy_icon_get_checksum(pBuddyIcon);
+    }
+    else
+    {
+        updateUserInfo.m_isBuddy = false;
+    }
+
+                       updateUserInfo.m_userName      .assign(pUserName);
+    if (pHash != NULL) updateUserInfo.m_buddyImageHash.assign(pHash);
+//    Spin::pushJob(getConnector(), updateUserInfo);
+    pConnector->pushJob(std::move(updateUserInfo));
 }
 
 } // namespace Spin

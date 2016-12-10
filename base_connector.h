@@ -116,11 +116,183 @@ enum ERoomType
     RoomType_Game     = 3,
 };
 
+enum EIMSystemFlag
+{
+    IMSystemFlag_NotRegistered   = 0,
+    IMSystemFlag_DoesNotAcceptIM = 1,
+    IMSystemFlag_Offline         = 2
+};
+
+inline EIMSystemFlag operator| (EIMSystemFlag _lhs, EIMSystemFlag _rhs)
+{
+    return static_cast<EIMSystemFlag>(static_cast<int>(_lhs) | static_cast<int>(_rhs));
+}
+
+inline EIMSystemFlag& operator|= (EIMSystemFlag& _lhs, const EIMSystemFlag& _rhs)
+{
+    _lhs = static_cast<EIMSystemFlag>(static_cast<int>(_lhs) | static_cast<int>(_rhs));
+    return _lhs;
+}
+
+class CUserProfileEntry
+{
+public:
+    enum EUserProfileEntryType
+    {
+        UserInfoType_Headline,
+        UserInfoType_Pair    ,
+        UserInfoType_Line    ,
+    };
+
+public:
+    CUserProfileEntry(EUserProfileEntryType _type)
+        : m_type  (_type)
+        , m_first ()
+        , m_second()
+    { }
+
+    CUserProfileEntry()
+        : m_type  (UserInfoType_Line)
+        , m_first ()
+        , m_second()
+    { }
+
+    CUserProfileEntry(EUserProfileEntryType _type, const char* _pFirst)
+        : m_type  (_type)
+        , m_first (_pFirst)
+        , m_second()
+    { }
+
+    CUserProfileEntry(const char* _pFirst)
+        : m_type  (UserInfoType_Headline)
+        , m_first (_pFirst)
+        , m_second()
+    { }
+
+    CUserProfileEntry(EUserProfileEntryType _type, const char* _pFirst, const char* _pSecond)
+        : m_type  (_type)
+        , m_first (_pFirst)
+        , m_second(_pSecond)
+    { }
+
+    CUserProfileEntry(const char* _pFirst, const char* _pSecond)
+        : m_type  (UserInfoType_Pair)
+        , m_first (_pFirst)
+        , m_second(_pSecond)
+    { }
+
+    CUserProfileEntry(EUserProfileEntryType _type, std::string&& _rrFirst, const char* _pSecond)
+        : m_type  (_type)
+        , m_first (std::move(_rrFirst))
+        , m_second(_pSecond)
+    { }
+
+    CUserProfileEntry(std::string&& _rrFirst, const char* _pSecond)
+        : m_type  (UserInfoType_Pair)
+        , m_first (std::move(_rrFirst))
+        , m_second(_pSecond)
+    { }
+
+    CUserProfileEntry(EUserProfileEntryType _type, const char* _pFirst, std::string&& _rrSecond)
+        : m_type  (_type)
+        , m_first (_pFirst)
+        , m_second(std::move(_rrSecond))
+    { }
+
+    CUserProfileEntry(const char* _pFirst, std::string&& _rrSecond)
+        : m_type  (UserInfoType_Pair)
+        , m_first (_pFirst)
+        , m_second(std::move(_rrSecond))
+    { }
+
+    CUserProfileEntry(EUserProfileEntryType _type, std::string&& _rrFirst)
+        : m_type  (_type)
+        , m_first (std::move(_rrFirst))
+        , m_second()
+    { }
+
+    CUserProfileEntry(std::string&& _rrFirst)
+        : m_type  (UserInfoType_Headline)
+        , m_first (std::move(_rrFirst))
+        , m_second()
+    { }
+
+    CUserProfileEntry(EUserProfileEntryType _type, std::string&& _rrFirst, std::string&& _rrSecond)
+        : m_type  (_type)
+        , m_first (std::move(_rrFirst))
+        , m_second(std::move(_rrSecond))
+    { }
+
+    CUserProfileEntry(std::string&& _rrFirst, std::string&& _rrSecond)
+        : m_type  (UserInfoType_Pair)
+        , m_first (std::move(_rrFirst))
+        , m_second(std::move(_rrSecond))
+    { }
+
+    ~CUserProfileEntry()
+    {
+
+    }
+
+private:
+    EUserProfileEntryType m_type;
+
+    std::string m_first;
+    std::string m_second;
+
+public:
+    inline CUserProfileEntry& setHeadline(const std::string& _rHeadline)
+    {
+        m_type  = UserInfoType_Headline;
+        m_first = _rHeadline;
+
+        return *this;
+    }
+
+    inline CUserProfileEntry& setPair(const std::string& _rLabel, const std::string& _rValue)
+    {
+        m_type   = UserInfoType_Pair;
+        m_first  = _rLabel;
+        m_second = _rValue;
+
+        return *this;
+    }
+
+    inline CUserProfileEntry& setLine()
+    {
+        m_type = UserInfoType_Line;
+
+        return *this;
+    }
+
+    inline EUserProfileEntryType getType() const
+    {
+        return m_type;
+    }
+
+    inline const std::string& getHeadline() const
+    {
+        return m_first;
+    }
+
+    inline const std::string& getFirst() const
+    {
+        return m_first;
+    }
+
+    inline const std::string& getSecond() const
+    {
+        return m_second;
+    }
+};
+
 class CConnector;
 
 class CBaseConnector
 {
 public:
+    typedef std::vector<CUserProfileEntry> TUserProfile;
+
     struct SBuddyState
     {
         int         m_id;
@@ -145,7 +317,7 @@ public:
 
 public:
     CBaseConnector();
-    ~CBaseConnector();
+    virtual ~CBaseConnector();
 
 public:
     CConnector* getConnector();
@@ -164,6 +336,9 @@ public:
 
     virtual void buddyListRefresh(std::vector<SBuddyState>& _rBuddies) = 0;
     virtual void buddyStateChange(SBuddyState* _pBuddy) = 0;
+    virtual void buddyAddImage(const char* _pUsername, void* _pImageData, size_t _imageSize, const char* _pChecksum) = 0;
+    virtual void buddySetProfile(const char* _pUserName, const TUserProfile& _rInfos) = 0;
+    virtual void buddySetProfile(const char* _pUserName, TUserProfile&& _rrInfos) = 0;
 //    virtual void buddyList(SBuddyState* _pBuddies, size_t _numberOfBuddies) = 0;
 //    virtual void buddyAdd() = 0;
 //    virtual void buddyRemoved() = 0;
@@ -172,6 +347,7 @@ public:
 //    virtual void imClose() = 0;
     virtual void imSetTypingState(const char* _pUserName, ETypingState _state) = 0;
     virtual void imAddMessage(const char* _pUsername, char _type, const char* _pMessage) = 0;
+    virtual void imAddStatusMessage(const char* _pUsername, EIMSystemFlag _flag) = 0;
 
     virtual void chatSetList(std::vector<SRoom>& _rRooms) = 0;
     virtual void chatUserStateChange(const SChatUserState* _pUsers, size_t _numberOfUserStates) = 0;

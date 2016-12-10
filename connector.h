@@ -24,6 +24,7 @@
 #include "base_connector.h"
 #include "http_request.h"
 #include "message.h"
+#include "job.h"
 
 #include <string>
 #include <thread>
@@ -38,6 +39,8 @@
 #include <atomic>
 #include <queue>
 #include <condition_variable>
+#include <unordered_map>
+
 #ifdef __MINGW32__
 #include <mingw.condition_variable.h>
 #endif
@@ -46,14 +49,6 @@ namespace Spin
 {
 
 class CBaseConnector;
-
-namespace Job
-{
-
-struct SBaseJob;
-struct SMixedJob;
-
-}
 
 class CConnector
 {
@@ -70,10 +65,40 @@ public:
         std::vector<SBuddyRequest> m_buddyRequests;
     };
 
-    enum EInternJobType
+    struct SUserInfo
     {
-        InternJob_RefreshBuddies
+        SUserInfo()
+            : m_buddyName ("")
+            , m_id        ("")
+            , m_thumbURL  ("")
+            , m_photoURL  ("")
+            , m_age       (0)
+            , m_gender    (0)
+            , m_registered(false)
+            , m_noFake    (false)
+            , m_underage  (false)
+            , m_isValid   (false)
+        {
+
+        }
+
+        std::string m_buddyName;
+        std::string m_id;
+        std::string m_thumbURL;
+        std::string m_photoURL;
+        char        m_age;
+        char        m_gender;
+        bool        m_registered;
+        bool        m_noFake;
+        bool        m_underage;
+        bool        m_isValid;
     };
+
+//    enum EInternJobType
+//    {
+//        InternJob_RefreshBuddies,
+//        InternJob_RequestBuddyImage,
+//    };
 
 public:
     CConnector(CBaseConnector* _pBaseConnector);
@@ -103,16 +128,32 @@ public:
     int_least64_t getLastSentTimestamp() const;
 
     void pushIn(const char* _pBuffer, size_t _length);
-    void pushOut(const std::string& _rMessage);
-    void pushJob(Job::SBaseJob* _pJob);
-    void pushOut(std::string&& _rrMessage);
+
+    template <typename T>
+    void pushOut(T&& _rMessageDescriptor);
+
+    void pushOut2(std::string&& _rMessage);
+
+    template <typename T>
+    void pushJob(T&& _rrJobDescriptor);
+    template <typename T>
+    void pushJob(const T& _rrJobDescriptor);
 
     void execHomeRequest(bool _sync, CConnector::SHomeRequestResult&);
 
     bool sendOut(const std::string& _rMessage);
 
     void interpretInLine(const std::string& _rLine);
-    void interpretInLine_j(size_t _numberOfAnchors);
+    void interpretInLine_g();
+    void interpretInLine_h();
+    void interpretInLine_j();
+    void interpretInLine_T();
+    void interpretInLine_x();
+    void interpretInLine_plus();
+    void interpretInLine_equals();
+    void interpretInLine_biggerThan();
+    void interpretInLine_semicolon(size_t _lineLength);
+
 
     bool isHeartbeating();
     void setHearthbeat(bool _state);
@@ -122,12 +163,13 @@ public:
     const char* getSecret() const;
 
     const std::string getCookie(const std::string& _rString);
+    void setUserInfo(const std::string& _rUserName, SUserInfo& _rUserInfo);
+//    void updateUserInfo(const std::string& _rUserName, const std::string& _rBuddyImageHash);
 
     unsigned int getSemicolonCount();
 
 private:
     bool login();
-    void requestBuddyListUpdate();
 
 private:
     int getSndID();
@@ -140,8 +182,7 @@ private:
 
 private:
     typedef std::queue<std::string>    TMessageQueue;
-    typedef std::queue<void*>          TMixedJobQueue;
-    typedef std::queue<EInternJobType> TInternJobQueue;
+    typedef std::queue<Job::CJob>      TMixedJobQueue;
 
     char*          m_pUsername;
     char*          m_pPassword;
@@ -162,11 +203,11 @@ private:
 
     TMessageQueue*  m_pOutQueue;
     TMixedJobQueue* m_pMixedJobQueue;
-    TInternJobQueue* m_pInternJobQueue;
+//    TInternJobQueue* m_pInternJobQueue;
 
     TMessageQueue*  m_pOutQueueThreaded;
     TMixedJobQueue* m_pMixedJobQueueThreaded;
-    TInternJobQueue* m_pInternJobQueueThreaded;
+//    TInternJobQueue* m_pInternJobQueueThreaded;
 
     std::atomic_bool m_isConnected;
     std::atomic_bool m_isConnecting;
@@ -194,10 +235,69 @@ private:
     char m_inLine[c_maxInLine];
     size_t m_anchorLengths[c_maxAnchors];
     char* m_pAnchors[c_maxAnchors];
+    size_t m_numberOfAnchors;
 
     char m_secret[c_secretMaxLength + 1];
 
+    std::unordered_map<std::string, SUserInfo> m_userInfos;
+
 };
+
+template <typename T>
+void CConnector::pushJob(T&& _rrJobDescriptor)
+{
+    static_assert(std::is_base_of<Spin::Job::SJob, T>::value, "T must inherit from SJob");
+//    assert(_pJob != nullptr);
+
+//    Log::info("sys") << "locking outMessageMutex" << Log::end;
+    m_outMessageMutex.lock();
+//    Log::info("sys") << "locked outMessageMutex" << Log::end;
+
+//    if (_pJob->m_type == Job::JobType_Mixed)
+//    {
+//        Log::info("sys") << "push MixedJob" << Log::end;
+//        m_pMixedJobQueue->push(_pJob);
+//    }
+
+    m_pMixedJobQueue->emplace(std::forward<T>(_rrJobDescriptor));
+
+//    Log::info("sys") << "unlocking outMessageMutex" << Log::end;
+    m_outMessageMutex.unlock();
+//    Log::info("sys") << "unlocked outMessageMutex" << Log::end;
+}
+
+template <typename T>
+void CConnector::pushJob(const T& _rJobDescriptor)
+{
+    static_assert(std::is_base_of<Spin::Job::SJob, T>::value, "T must inherit from SJob");
+//    assert(_pJob != nullptr);
+
+//    Log::info("sys") << "locking outMessageMutex" << Log::end;
+    m_outMessageMutex.lock();
+//    Log::info("sys") << "locked outMessageMutex" << Log::end;
+
+//    if (_pJob->m_type == Job::JobType_Mixed)
+//    {
+//        Log::info("sys") << "push MixedJob" << Log::end;
+//        m_pMixedJobQueue->push(_pJob);
+//    }
+
+    m_pMixedJobQueue->emplace(_rJobDescriptor);
+
+//    Log::info("sys") << "unlocking outMessageMutex" << Log::end;
+    m_outMessageMutex.unlock();
+//    Log::info("sys") << "unlocked outMessageMutex" << Log::end;
+}
+
+template <typename T>
+void CConnector::pushOut(T&& _rMessageDescriptor)
+{
+    // this fails for some reason :(
+//    static_assert(std::is_base_of<Spin::Message::SOutJob, T>::value, "T must inherit from SOutJob");
+    m_outMessageMutex.lock();
+    m_pOutQueue->push(_rMessageDescriptor.create());
+    m_outMessageMutex.unlock();
+}
 
 }
 

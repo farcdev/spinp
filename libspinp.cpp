@@ -53,7 +53,7 @@ static guint g_derp;
 
 static Spin::CPurpleConnector* getPurpleConnector(PurpleConnection* _pConnection)
 {
-    assert(purple_connection_get_protocol_data(_pConnection) != NULL);
+    g_return_val_if_fail(purple_connection_get_protocol_data(_pConnection) != NULL, nullptr);
 
     return reinterpret_cast<Spin::CPurpleConnector*>(purple_connection_get_protocol_data(_pConnection));
 }
@@ -84,17 +84,6 @@ static gboolean spinp_event_loop(gpointer _pData)
     }
 
     pPurpleConnector->purpleOnLoop();
-
-//    PurpleConversation* pConversation = purple_find_chat(m_pPurpleConnection, it->second);
-//    PurpleConvChat* pConvChat = pConversation->u.chat;
-//
-//    purple_conv_chat_write(
-//        pConvChat,
-//        _pUsername,
-//        _pMessage,
-//        PURPLE_MESSAGE_RECV,
-//        time(0)
-//    );
 
     return TRUE;
 }
@@ -133,6 +122,75 @@ static GList* spinp_chat_info(PurpleConnection* _pConnection)
     return pList;
 }
 
+static int* spinp_get_handle()
+{
+    static int s_handle;
+
+    return &s_handle;
+}
+
+static void spinp_event_conversation_created(PurpleConversation* _pConversation)
+{
+    PurpleConversationType type = purple_conversation_get_type(_pConversation);
+
+//    PurpleBuddyIcon* pIcon = purple_buddy_icons_find(purple_conversation_get_account(_pConversation), purple_conversation_get_name(_pConversation));
+//
+//    if (pIcon != NULL)
+//    {
+//        std::cout << "ICON FOUND" << std::endl;
+//        std::cout << "ICON FOUND" << std::endl;
+//        std::cout << "ICON FOUND" << std::endl;
+//        std::cout << "ICON FOUND" << std::endl;
+//        std::cout << "ICON FOUND" << std::endl;
+//        std::cout << "ICON FOUND" << std::endl;
+//        std::cout << "ICON FOUND" << std::endl;
+//        std::cout << "ICON FOUND" << std::endl;
+//    }
+
+    if (type == PURPLE_CONV_TYPE_IM)
+    {
+        Spin::CPurpleConnector* pPurpleConnector =
+            reinterpret_cast<Spin::CPurpleConnector*>(
+                purple_connection_get_protocol_data(
+                    purple_account_get_connection(
+                        purple_conversation_get_account(_pConversation)
+                    )
+                )
+            );
+
+        pPurpleConnector->purpleOnIMConversationCreated(_pConversation);
+
+//        const char* pUserName = purple_conversation_get_name(_pConversation);
+//        const char* pHash     = NULL;
+//
+//        Spin::Job::SIMInit imInit;
+//        imInit.m_userName = pUserName;
+//        Spin::pushJob(pPurpleConnector->getConnector(), &imInit);
+//
+////        PurpleBuddyIcon* pBuddyIcon = purple_buddy_icons_find(purple_conversation_get_account(_pConversation), pUserName);
+//
+////        if (pBuddyIcon != NULL)
+////            pHash = purple_buddy_icon_get_checksum(pBuddyIcon);
+//
+////        purple_buddy_icons_get_checksum_for_user()
+//
+//
+//        PurpleBuddy* pBuddy = purple_find_buddy(purple_conversation_get_account(_pConversation), pUserName);
+//        if (pBuddy != NULL)
+//        {
+//            PurpleBuddyIcon* pBuddyIcon = purple_buddy_get_icon(pBuddy);
+//
+//            if (pBuddyIcon != NULL)
+//                pHash = purple_buddy_icon_get_checksum(pBuddyIcon);
+//        }
+//
+//        Spin::Job::SUpdateUserInfo* pUpdateUserInfo = new Spin::Job::SUpdateUserInfo();
+//                           pUpdateUserInfo->m_userName      .assign(pUserName);
+//        if (pHash != NULL) pUpdateUserInfo->m_buddyImageHash.assign(pHash);
+//        Spin::pushJob(pPurpleConnector->getConnector(), pUpdateUserInfo);
+    }
+}
+
 static void spinp_login(PurpleAccount* _pAccount)
 {
     purple_debug_info(SPINP_PRPL_ID, "spinp_login\n");
@@ -156,80 +214,119 @@ static void spinp_login(PurpleAccount* _pAccount)
     }
 
     g_derp = purple_timeout_add(300, spinp_event_loop, pPurpleConnector);
+
+    purple_signal_connect(
+        purple_conversations_get_handle(),
+        "conversation-created",
+        spinp_get_handle(),
+        PURPLE_CALLBACK(spinp_event_conversation_created),
+        NULL
+    );
 }
 
 static void spinp_close(PurpleConnection* _pConnection)
 {
     try
     {
-        purple_debug_info(SPINP_PRPL_ID, "spinp_close\n");
+        purple_debug_info(SPINP_PRPL_ID, "spinp_close 0\n");
 
         if (!purple_timeout_remove(g_derp))
         {
             purple_debug_info(SPINP_PRPL_ID, "couldn't stop timeout\n");
         }
 
-        purple_debug_info(SPINP_PRPL_ID, "1");
+        purple_debug_info(SPINP_PRPL_ID, "spinp_close 1\n");
 
         Spin::CPurpleConnector* pPurpleConnector = getPurpleConnector(_pConnection);
 
-        purple_debug_info(SPINP_PRPL_ID, "2");
+        purple_debug_info(SPINP_PRPL_ID, "spinp_close 2\n");
 
         if (pPurpleConnector != nullptr)
         {
-            purple_debug_info(SPINP_PRPL_ID, "3");
+            purple_debug_info(SPINP_PRPL_ID, "spinp_close 3\n");
             pPurpleConnector->stop();
 
-            purple_debug_info(SPINP_PRPL_ID, "4");
+            purple_debug_info(SPINP_PRPL_ID, "spinp_close 4\n");
             delete pPurpleConnector;
 
-            purple_debug_info(SPINP_PRPL_ID, "5");
+            purple_debug_info(SPINP_PRPL_ID, "spinp_close 5\n");
         }
-        purple_debug_info(SPINP_PRPL_ID, "6");
+        purple_debug_info(SPINP_PRPL_ID, "spinp_close 6\n");
 
         purple_connection_set_protocol_data(_pConnection, nullptr);
 
-        purple_debug_info(SPINP_PRPL_ID, "7");
+        purple_debug_info(SPINP_PRPL_ID, "spinp_close 7\n");
     }
     catch (std::exception e)
     {
         purple_debug_info(SPINP_PRPL_ID, e.what());
     }
 
-    purple_debug_info(SPINP_PRPL_ID, "8");
+    purple_debug_info(SPINP_PRPL_ID, "spinp_close 8\n");
 }
 
 static int spinp_send_im(PurpleConnection* _pConnection, const char* _pWho, const char* _pMessage, PurpleMessageFlags _flags)
 {
     Spin::CPurpleConnector* pPurpleConnector = getPurpleConnector(_pConnection);
-    Spin::Job::SIMMessage message;
+    Spin::Message::SIMMessage message;
 
     message.m_user = _pWho;
     message.m_message = _pMessage;
-    message.m_messageType = Spin::Job::Normal;
+    message.m_messageType = Spin::Message::ChatMessageType_Normal;
 
     purple_debug_info(pPurpleConnector->getPluginId(), "sending message \"%s\" to %s\n", _pMessage, _pWho);
 
 //    Spin::CConnector* pConnector = pPurpleConnector->getConnector();
-    Spin::pushJob(pPurpleConnector->getConnector(), &message);
+    pPurpleConnector->getConnector()->pushOut(message);
 //    pConnector->pushOut(Spin::createMessage(Spin::Job::IMMessage, &message));
 
     return 1;
 }
 
+static void spinp_set_info(PurpleConnection* _pConnection, const char* _pInfo)
+{
+    purple_debug_error(SPINP_PRPL_ID, "called spinp_set_info with info %s", _pInfo);
+}
+
 static unsigned int spinp_send_typing(PurpleConnection* _pConnection, const char* _pName, PurpleTypingState _state)
 {
     Spin::CPurpleConnector* pPurpleConnector = getPurpleConnector(_pConnection);
-    Spin::Job::SIMTyping message;
+    Spin::Message::SIMTyping message;
 
     message.m_user = _pName;
     message.m_state = _state == PURPLE_TYPING ? Spin::Typing_Typing : Spin::Typing_Nothing;
 
 //    Spin::CConnector* pConnector = pPurpleConnector->getConnector();
 //    pConnector->pushOut(Spin::createMessage(Spin::Job::IMTyping, &message));
-    Spin::pushJob(pPurpleConnector->getConnector(), &message);
+    pPurpleConnector->getConnector()->pushOut(message);
 
     return 0;
+}
+
+static void spinp_get_info(PurpleConnection* _pConnection, const char* _pWho)
+{
+    purple_debug_info(SPINP_PRPL_ID, "called spinp_get_info for user %s", _pWho);
+    Spin::CPurpleConnector* pPurpleConnector = getPurpleConnector(_pConnection);
+
+//    PurpleNotifyUserInfo* pN = purple_notify_user_info_new();
+//
+//    purple_notify_user_info_add_section_header(pN, "Allgemein");
+//    purple_notify_user_info_add_pair(pN, "my label", "http://www.somerandompage.com");
+//    purple_notify_user_info_add_pair(pN, "my label", "http://www.somerandompage.com");
+//    purple_notify_user_info_add_pair(pN, "my label", "http://www.somerandompage.com");
+//    purple_notify_user_info_add_pair(pN, "my label", "http://www.somerandompage.com");
+//    purple_notify_user_info_add_section_break(pN);
+//
+//    purple_notify_userinfo(_pConnection, _pWho, pN, NULL, NULL);
+//
+
+//    Spin::Job::SRequestUserProfile* pJob = new Spin::Job::SRequestUserProfile();
+//    pJob->m_userName = _pWho;
+
+    Spin::Job::SRequestUserProfile userProfile;
+    userProfile.m_userName = _pWho;
+
+    pPurpleConnector->getConnector()->pushJob(std::move(userProfile));
 }
 
 static void spinp_set_status(PurpleAccount* _pAccount, PurpleStatus* _pStatus)
@@ -265,8 +362,9 @@ static PurpleRoomlist* spinp_roomlist_get_list(PurpleConnection* _pConnection)
     purple_roomlist_set_fields(pRoomList, pFields);
     purple_roomlist_set_in_progress(pRoomList, TRUE);
 
-    Spin::Job::SGetRoomList* pGetRoomListJob = new Spin::Job::SGetRoomList();
-    Spin::pushJob(pPurpleConnector->getConnector(), pGetRoomListJob);
+//    Spin::Job::SGetRoomList* pGetRoomListJob = new Spin::Job::SGetRoomList();
+//    Spin::pushJob(pPurpleConnector->getConnector(), Spin::SGetRoomList());
+    pPurpleConnector->getConnector()->pushJob(Spin::Job::SGetRoomList());
 //    }
 
     return pRoomList;
@@ -285,12 +383,14 @@ static void spinp_add_buddy_invite(PurpleConnection* _pConnection, PurpleBuddy* 
 
     Spin::CPurpleConnector* pPurpleConnector = getPurpleConnector(_pConnection);
 
-    Spin::Job::SAskAuthBuddy* pAuthBuddy = new Spin::Job::SAskAuthBuddy();
-    pAuthBuddy->m_userName = _pBuddy->name;
-    if (_pMessage != NULL) pAuthBuddy->m_message = _pMessage;
-    else                   pAuthBuddy->m_message = "";
+//    Spin::Job::SAskAuthBuddy* pAuthBuddy = new Spin::Job::SAskAuthBuddy();
+    Spin::Job::SAskAuthBuddy authBuddy;
+    authBuddy.m_userName = _pBuddy->name;
+    if (_pMessage != NULL) authBuddy.m_message = _pMessage;
+    else                   authBuddy.m_message = "";
 
-    Spin::pushJob(pPurpleConnector->getConnector(), pAuthBuddy);
+//    Spin::pushJob(pPurpleConnector->getConnector(), authBuddy);
+    pPurpleConnector->getConnector()->pushJob(std::move(authBuddy));
 }
 
 static void spinp_add_permit(PurpleConnection* _pConnection, const char* _pWho)
@@ -360,12 +460,12 @@ static void spinp_chat_join(PurpleConnection* _pConnection, GHashTable* _pCompon
 //        return;
 //    }
 
-    Spin::Job::SJoinChatRoom message;
+    Spin::Message::SJoinChatRoom message;
     message.m_room = pRoomName;
 
 //    Spin::CConnector* pConnector = pPurpleConnector->getConnector();
 //    pConnector->pushOut(Spin::createMessage(Spin::Job::JoinChatRoom, &message));
-    Spin::pushJob(pPurpleConnector->getConnector(), &message);
+    pPurpleConnector->getConnector()->pushOut(message);
 
 //    void* conversationsHandle = purple_conversations_get_handle();
 
@@ -376,12 +476,12 @@ static void spinp_chat_leave(PurpleConnection* _pConnection, int _id)
     Spin::CPurpleConnector* pPurpleConnector = getPurpleConnector(_pConnection);
     PurpleConvChat* pChat = pPurpleConnector->purpleGetConvChat(_id);
 
-    Spin::Job::SLeaveChatRoom message;
+    Spin::Message::SLeaveChatRoom message;
     message.m_room = purple_conversation_get_name(purple_conv_chat_get_conversation(pChat));
 
 //    Spin::CConnector* pConnector = pPurpleConnector->getConnector();
 //    pConnector->pushOut(Spin::createMessage(Spin::Job::LeaveChatRoom, &message));
-    Spin::pushJob(pPurpleConnector->getConnector(), &message);
+    pPurpleConnector->getConnector()->pushOut(message);
 
 //    PurpleConvChat* pChat = g_pPurpleConnector->purpleGetConvChat(_id);
 //    const char* pChatName = purple_conversation_get_name(purple_conv_chat_get_conversation(pChat));
@@ -415,15 +515,15 @@ static int spinp_chat_send(PurpleConnection* _pConnection, int _id, const char* 
 
     if (pName == nullptr) return 0;
 
-    Spin::Job::SChatMessage message;
+    Spin::Message::SChatMessage message;
 
     message.m_room        = pName;
     message.m_message     = _pMessage;
-    message.m_messageType = Spin::Job::Normal;
+    message.m_messageType = Spin::Message::ChatMessageType_Normal;
 
 //    Spin::CConnector* pConnector = pPurpleConnector->getConnector();
 //    pConnector->pushOut(Spin::createMessage(Spin::Job::ChatMessage, &message));
-    Spin::pushJob(pPurpleConnector->getConnector(), &message);
+    pPurpleConnector->getConnector()->pushOut(message);
 
     return 1;
 }
@@ -487,9 +587,9 @@ static PurplePluginProtocolInfo spinp_protocol_info =
     spinp_login,        /* login */
     spinp_close,        /* close */
     spinp_send_im,    /* send_im */
-    NULL,            /* set_info */
+    spinp_set_info,            /* set_info */
     spinp_send_typing, /* send_typing */
-    NULL,            /* get_info */
+    spinp_get_info,            /* get_info */
     spinp_set_status,    /* set_status */
     NULL,            /* set_idle */
     NULL,            /* change_passwd */
@@ -538,7 +638,7 @@ static PurplePluginProtocolInfo spinp_protocol_info =
     NULL,            /* send_attention */
     NULL,            /* attention_types */
     sizeof(PurplePluginProtocolInfo),    /* struct_size */
-    NULL,            /*campfire_get_account_text_table *//* get_account_text_table */
+    NULL,            /* get_account_text_table */
     NULL,            /* initiate_media */
     NULL,            /* get_media_caps */
     NULL,            /* get_moods */

@@ -23,12 +23,15 @@
 #include <string>
 #include <map>
 #include <bits/atomic_base.h>
+#include <vector>
+#include <unordered_map>
 
 namespace Spin
 {
 
 typedef size_t (*httpRequestCallback)(void*, double, double, double, double);
 typedef size_t (*writeCallback)(char*, size_t, size_t, void*);
+typedef std::unordered_map<std::string, std::string> TMaps;
 
 class CHttpRequest
 {
@@ -41,10 +44,15 @@ public:
     void setHttps(bool _isHttps);
     void setTimeout(long _timeoutInSeconds);
     void setQuery(const std::string& _rUrl);
+    void setQuery(std::string&& _rrUrl);
     void setSubDomain(const std::string& _rSubDomain);
+    void setSubDomain(std::string&& _rrSubDomain);
     void setGetParameter(const std::string& _rKey, const std::string& _rValue);
+    void setGetParameter(std::string&& _rrKey, std::string&& _rrValue);
     void setPostParameter(const std::string& _rKey, const std::string& _rValue);
+    void setPostParameter(std::string&& _rrKey, std::string&& _rrValue);
     void setHeader(const std::string& _rKey, const std::string& _rValue);
+    void setHeader(std::string&& _rrKey, std::string&& _rrValue);
     void setFollow(bool _follow);
     void setPostRedirect(bool _postRedirect);
     void setLongPoll(bool _longPoll);
@@ -59,6 +67,7 @@ public:
 public:
     bool exec();
     bool execSync();
+    bool execSync(std::vector<char>* _pVector);
     bool execSync(std::string* _pResultBody);
     bool execSync(std::string* _pResultBody, std::string* _pResultHeader);
 
@@ -66,29 +75,30 @@ private:
     bool execRequest(void* _pCurl);
 
 private:
-    const static std::map<std::string, std::string> m_defaultHeaders;
+    const static TMaps m_defaultHeaders;
 
 private:
-    std::string                        m_query;
-    std::string                        m_subDomain;
-    std::map<std::string, std::string> m_getParameters;
-    std::map<std::string, std::string> m_postParameters;
-    std::map<std::string, std::string> m_headers;
-    bool                               m_follow;
-    bool                               m_postRedirect;
-    bool                               m_isHttps;
-    bool                               m_longPoll;
-    long                               m_timeoutInSeconds;
+    std::string         m_query;
+    std::string         m_domain;
+    std::string         m_subDomain;
+    TMaps               m_getParameters;
+    TMaps               m_postParameters;
+    TMaps               m_headers;
+    bool                m_follow;
+    bool                m_postRedirect;
+    bool                m_isHttps;
+    bool                m_longPoll;
+    long                m_timeoutInSeconds;
 
-    httpRequestCallback                m_pProgressCallback;
-    void*                              m_pProgressCallbackData;
+    httpRequestCallback m_pProgressCallback;
+    void*               m_pProgressCallbackData;
 
-    writeCallback                      m_pWriteCallback;
-    void*                              m_pWriteCallbackData;
+    writeCallback       m_pWriteCallback;
+    void*               m_pWriteCallbackData;
 
 
 #ifdef SPINPLOG
-    static std::atomic_uint            m_requestNumber;
+    static std::atomic_uint m_requestNumber;
 #endif
 
 };

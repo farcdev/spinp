@@ -29,6 +29,16 @@
 namespace
 {
 
+size_t writeToVector(char* _pBuffer, size_t _size, size_t _nmemb, void* _pVector)
+{
+    size_t length = _size * _nmemb;
+    std::vector<char>* pVector = reinterpret_cast<std::vector<char>*>(_pVector);
+
+    pVector->insert(pVector->end(), &_pBuffer[0], &_pBuffer[length]);
+
+    return length;
+}
+
 size_t writeToStdString(char* _pBuffer, size_t _size, size_t _nmemb, void* _pString)
 {
     size_t length = _size * _nmemb;
@@ -84,7 +94,7 @@ static int traceRequest(CURL *_pHandle, curl_infotype _type, char* _pData, size_
 namespace Spin
 {
 
-const std::map<std::string, std::string> CHttpRequest::m_defaultHeaders =
+const TMaps CHttpRequest::m_defaultHeaders =
     {
         { "Connection"     , "keep-alive"                                                                                                         },
         { "Accept"         , "*/*"                                                                                                                },
@@ -157,9 +167,19 @@ void CHttpRequest::setQuery(const std::string& _rQuery)
     m_query = _rQuery;
 }
 
+void CHttpRequest::setQuery(std::string&& _rrUrl)
+{
+    m_query = std::move(_rrUrl);
+}
+
 void CHttpRequest::setSubDomain(const std::string& _rSubDomain)
 {
     m_subDomain = _rSubDomain;
+}
+
+void CHttpRequest::setSubDomain(std::string&& _rrSubDomain)
+{
+    m_subDomain = std::move(_rrSubDomain);
 }
 
 void CHttpRequest::setGetParameter(const std::string& _rKey, const std::string& _rValue)
@@ -167,14 +187,53 @@ void CHttpRequest::setGetParameter(const std::string& _rKey, const std::string& 
     m_getParameters[_rKey] = _rValue;
 }
 
+void CHttpRequest::setGetParameter(std::string&& _rrKey, std::string&& _rrValue)
+{
+    auto it = m_getParameters.find(_rrKey);
+    if (it == m_getParameters.cend())
+    {
+        it->second = std::move(_rrValue);
+    }
+    else
+    {
+        m_getParameters.emplace(std::make_pair(_rrKey, _rrValue));
+    }
+}
+
 void CHttpRequest::setPostParameter(const std::string& _rKey, const std::string& _rValue)
 {
     m_postParameters[_rKey] = _rValue;
 }
 
+void CHttpRequest::setPostParameter(std::string&& _rrKey, std::string&& _rrValue)
+{
+    auto it = m_postParameters.find(_rrKey);
+    if (it == m_postParameters.cend())
+    {
+        it->second = std::move(_rrValue);
+    }
+    else
+    {
+        m_postParameters.emplace(std::make_pair(_rrKey, _rrValue));
+    }
+}
+
 void CHttpRequest::setHeader(const std::string& _rKey, const std::string& _rValue)
 {
     m_headers[_rKey] = _rValue;
+}
+
+void CHttpRequest::setHeader(std::string&& _rrKey, std::string&& _rrValue)
+{
+    auto it = m_headers.find(_rrKey);
+    if (it == m_headers.cend())
+    {
+        it->second = std::move(_rrValue);
+    }
+    else
+    {
+        m_headers.emplace(std::make_pair(_rrKey, _rrValue));
+    }
 }
 
 void CHttpRequest::removeGetParameter(const std::string& _rKey)
@@ -237,6 +296,28 @@ bool CHttpRequest::execSync()
     if (pCurl == nullptr)
     {
         return false;
+    }
+
+    bool result = execRequest(pCurl);
+
+    curl_easy_cleanup(pCurl);
+
+    return result;
+}
+
+bool CHttpRequest::execSync(std::vector<char>* _pVector)
+{
+    CURL* pCurl = curl_easy_init();
+
+    if (pCurl == nullptr)
+    {
+        return false;
+    }
+
+    if (_pVector != nullptr)
+    {
+        curl_easy_setopt(pCurl, CURLOPT_WRITEDATA    , _pVector      );
+        curl_easy_setopt(pCurl, CURLOPT_WRITEFUNCTION, &writeToVector);
     }
 
     bool result = execRequest(pCurl);
@@ -316,7 +397,7 @@ bool CHttpRequest::execRequest(void* _pCurl)
     curl_easy_setopt(_pCurl, CURLOPT_VERBOSE      , 1L          );
 #endif
 
-    std::map<std::string, std::string>::iterator it;
+    TMaps::iterator it;
 
     auto endOfDefault = m_defaultHeaders.cend();
     for (auto currentOfDefault = m_defaultHeaders.cbegin(); currentOfDefault != endOfDefault; ++ currentOfDefault)

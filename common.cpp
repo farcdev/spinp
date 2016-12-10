@@ -111,3 +111,72 @@ std::string Spin::urlDecode(const std::string& _rString)
 
     return str;
 }
+
+std::string Spin::hexEncode(const std::string& _rString)
+{
+    static const char s_hexLetters[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+
+    size_t stringLength = _rString.length();
+    std::string result(stringLength << 1, ' ');
+
+    size_t targetIndex = 0;
+    for (size_t index = 0; index < stringLength; ++ index)
+    {
+        char currentChar = _rString.at(index);
+
+        result.at(targetIndex ++) = s_hexLetters[(currentChar & static_cast<char>(0xF0)) >> 4];
+        result.at(targetIndex ++) = s_hexLetters[ currentChar & static_cast<char>(0x0F)      ];
+    }
+
+    return result;
+}
+
+//size_t Spin::stdStringFind(const std::string& _rString, const std::string& _rSearch, size_t _offset)
+//{
+//    return stdStringFind(_rString, _rSearch.c_str(), _offset);
+//}
+//
+//size_t Spin::stdStringFind(const std::string& _rString, const char* _pSearch, size_t _offset)
+//{
+//    if (*_pSearch == '\0') return std::string::npos;
+//
+//    auto currentIt = _rString.cbegin();
+//    currentIt += _offset;
+//    auto endIt = _rString.cend();
+//
+//    const char* pSearch = _pSearch;
+//
+//    for (currentIt; currentIt != endIt; ++ currentIt)
+//    {
+//        if (*currentIt == *pSearch)
+//        {
+//            auto possibleResult = currentIt;
+//
+//            for (;;)
+//            {
+//                if (pSearch == '\0')
+//                {
+//                    return static_cast<size_t>(currentIt - possibleResult) + _offset;
+//                }
+//
+//                const char currentChar = *pSearch;
+//
+//                if (currentChar == '%')
+//                {
+//
+//                }
+//
+//                if (*currentIt != currentChar)
+//                {
+//                    pSearch = _pSearch;
+//                    break;
+//                }
+//
+//                ++ pSearch;
+//                ++ possibleResult;
+//            }
+//        }
+//
+//    }
+//
+//}

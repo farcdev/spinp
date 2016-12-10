@@ -50,7 +50,7 @@ CLogger::~CLogger()
 
 void CLogger::flushStream()
 {
-    if (s_pStreamCategory->length() > 0)
+    if (s_pStreamCategory->length() > 0 && s_pStreamMessage->length() > 0)
     {
         log(s_streamLevel, *s_pStreamCategory, *s_pStreamMessage);
     }

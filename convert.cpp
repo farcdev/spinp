@@ -66,6 +66,7 @@ CConvert::CConvert(const char* _sourceSet, const char* _targetSet)
 
 CConvert::~CConvert()
 {
+    if (m_pSource != nullptr) delete[] m_pSource;
 }
 
 const char* CConvert::convert(const char* _pString)

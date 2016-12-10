@@ -23,6 +23,8 @@
 #include "convert.h"
 #include "extern/json/json.hpp"
 #include "purple_connector.h"
+#include "common.h"
+#include "job.h"
 
 
 #include <curl/curl.h>
@@ -70,9 +72,10 @@ size_t progressCallback(void* _pInstance, double _dlTotal, double _dlNow, double
     {
         pConn->setHearthbeat(true);
 
-        Job::SHearthbeat message;
+        Message::SHearthbeat message;
 
-        Spin::pushJob(pConn, &message);
+        pConn->pushOut(message);
+//        Spin::pushJob(pConn, &message);
     }
 
     if (pConn->isShutdown())
@@ -117,10 +120,8 @@ CConnector::CConnector(CBaseConnector* _pBaseConnector)
     , m_in                    ()
     , m_pOutQueue             (nullptr)
     , m_pMixedJobQueue        (nullptr)
-    , m_pInternJobQueue       (nullptr)
     , m_pOutQueueThreaded     (nullptr)
     , m_pMixedJobQueueThreaded(nullptr)
-    , m_pInternJobQueueThreaded(nullptr)
     , m_isConnected           (false)
     , m_isConnecting          (false)
     , m_heartBeats            ()
@@ -136,7 +137,9 @@ CConnector::CConnector(CBaseConnector* _pBaseConnector)
     , m_inLine                ()
     , m_anchorLengths         ()
     , m_pAnchors              ()
+    , m_numberOfAnchors       (0)
     , m_secret                ()
+    , m_userInfos             ()
 {
     assert(_pBaseConnector != nullptr);
 
@@ -146,8 +149,8 @@ CConnector::CConnector(CBaseConnector* _pBaseConnector)
     m_pOutQueueThreaded       = new TMessageQueue();
     m_pMixedJobQueue          = new TMixedJobQueue();
     m_pMixedJobQueueThreaded  = new TMixedJobQueue();
-    m_pInternJobQueue         = new TInternJobQueue();
-    m_pInternJobQueueThreaded = new TInternJobQueue();
+//    m_pInternJobQueue         = new TInternJobQueue();
+//    m_pInternJobQueueThreaded = new TInternJobQueue();
 }
 
 CConnector::~CConnector()
@@ -178,8 +181,6 @@ CConnector::~CConnector()
     purple_debug_info( "prpl-spinchat-protocol", "~CConnector 9\n"); if (m_pOutQueueThreaded       != nullptr) delete m_pOutQueueThreaded      ;
     purple_debug_info( "prpl-spinchat-protocol", "~CConnector 10\n"); if (m_pMixedJobQueue          != nullptr) delete m_pMixedJobQueue         ;
     purple_debug_info( "prpl-spinchat-protocol", "~CConnector 11\n"); if (m_pMixedJobQueueThreaded  != nullptr) delete m_pMixedJobQueueThreaded ;
-    purple_debug_info( "prpl-spinchat-protocol", "~CConnector 12\n"); if (m_pInternJobQueue         != nullptr) delete m_pInternJobQueue        ;
-    purple_debug_info( "prpl-spinchat-protocol", "~CConnector 13\n"); if (m_pInternJobQueueThreaded != nullptr) delete m_pInternJobQueueThreaded;
     purple_debug_info( "prpl-spinchat-protocol", "~CConnector 14\n");
 }
 
@@ -573,17 +574,12 @@ void CConnector::runOut()
         m_pMixedJobQueue = m_pMixedJobQueueThreaded;
         m_pMixedJobQueueThreaded = tmp2;
 
-        TInternJobQueue* tmp3 = m_pInternJobQueue;
-        m_pInternJobQueue = m_pInternJobQueueThreaded;
-        m_pInternJobQueueThreaded = tmp3;
-
         m_outMessageMutex.unlock();
 
         while (!m_pOutQueueThreaded->empty())
         {
-            std::string msg = m_pOutQueueThreaded->front();
+            const std::string& msg = m_pOutQueueThreaded->front();
             Log::info("request_out") << "Sending msg:\n" << msg << Log::end;
-            m_pOutQueueThreaded->pop();
 
             if (sendOut(msg))
             {
@@ -594,33 +590,24 @@ void CConnector::runOut()
                 Log::error("request_out") << "Request failed" << Log::end;
                 std::this_thread::sleep_for(std::chrono::seconds(3));
             }
+
+            m_pOutQueueThreaded->pop();
         }
 
         while (!m_pMixedJobQueueThreaded->empty())
         {
             Log::info("spinp_debug.log") << "on mixedJobQueue" << Log::end;
 
-            Job::SMixedJob* pMixedJob = reinterpret_cast<Job::SMixedJob*>(m_pMixedJobQueueThreaded->front());
+            Job::CJob& rJob = m_pMixedJobQueueThreaded->front();
+
+            std::cout << "HAHA 1" << std::endl;
+            Log::info("spinp_debug.log") << "before function" << Log::end;
+            std::cout << "HAHA 2" << std::endl;
+            rJob.run(this);
             m_pMixedJobQueueThreaded->pop();
 
-            Log::info("spinp_debug.log") << "before function" << Log::end;
-            pMixedJob->runJob(this);
-            delete pMixedJob;
+            std::cout << "HAHA 3" << std::endl;
             Log::info("spinp_debug.log") << "after function" << Log::end;
-        }
-
-        while (!m_pInternJobQueueThreaded->empty())
-        {
-            switch (m_pInternJobQueueThreaded->front())
-            {
-                case InternJob_RefreshBuddies:
-                    requestBuddyListUpdate();
-                    break;
-                default:
-                    Log::info("spinp_debug.log") << "unknown intern job" << Log::end;
-            }
-
-            m_pInternJobQueueThreaded->pop();
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -636,11 +623,7 @@ bool CConnector::sendOut(const std::string& _rMessage)
     int messageID = getMessageID();
     int_least64_t timestamp = getTimestamp();
 
-    Spin::CLogger& rLogger = Spin::CLogger::getInstance();
-    rLogger.log("in.log", "SND: " + std::to_string(sndID));
-    rLogger.log("in.log", "ACK: " + std::to_string(messageID));
-    rLogger.log("in.log", "MSG: " + _rMessage);
-    std::cout << _rMessage << std::endl;
+    Log::info("out") << "sending message\nsnd: " << sndID << "\nack: " << messageID << "\nmsg: " << _rMessage << Log::end;
 
     CHttpRequest request;
     request.setSubDomain("hc");
@@ -757,8 +740,7 @@ void CConnector::interpretInLine(const std::string& _rLine)
 {
     if (_rLine.length() == 0) return;
 
-    Spin::CLogger& rLogger = Spin::CLogger::getInstance();
-    rLogger.log("conn.log", "LINE: " + _rLine);
+    Log::info("conn_interpreter") << "interpreting line: " << _rLine << Log::end;
 
     const char* pEscapedLine = _rLine.c_str();
 
@@ -801,330 +783,130 @@ void CConnector::interpretInLine(const std::string& _rLine)
 
     *pBufferPosition = '\0';
 
-    const char* utf8Username;
+    m_numberOfAnchors = numberOfAnchors;
+//    char* pCmd = m_pAnchors[0];
 
-    char* pCmd = m_pAnchors[0];
-
-    if (pCmd[0] == 'T') // ack + snd
+    switch (m_pAnchors[0][0])
     {
-        // T#s#Number -> ack
-        // 0 1 2
-        if (*m_pAnchors[1] == 's')
-        {
-            setMessageID(atoi(m_pAnchors[2]));
-            rLogger.log("conn.log", "SETTING ACK: " + std::to_string(getMessageID()));
-        }
-        // T#c# -> snd
-        else if (*m_pAnchors[1] == 'c')
-        {
-            int snd = atoi(m_pAnchors[2]);
-
-            if (getSndID() != snd)
-            {
-                std::cout << snd << std::endl;
-            }
-            setSndID(snd + 1);
-            rLogger.log("conn.log", "SETTING SND: " + std::to_string(getSndID()));
-        }
+        case 'T': interpretInLine_T         (); break;
+        case '+': interpretInLine_plus      (); break;
+        case 'g': interpretInLine_g         (); break;
+        case 'h': interpretInLine_h         (); break;
+        case 'x': interpretInLine_x         (); break;
+        case 'j': interpretInLine_j         (); break;
+        case '=': interpretInLine_equals    (); break;
+        case '>': interpretInLine_biggerThan(); break;
+        case ';': interpretInLine_semicolon (_rLine.length()); break;
+        default:
+            Log::error("conn_interpreter") << "unhandled cmd m_pAnchors[0][0] == " << m_pAnchors[0][0] << Log::end;
+            break;
     }
-    else if (pCmd[0] == '+')
+}
+
+
+void CConnector::interpretInLine_g()
+{
+    // gRandomRoomname # RandomUsername # 3 # a # RandomMessage
+    // 0                 1                2   3   4
+
+    if (m_numberOfAnchors < 4)
     {
-        // [RandomUsername1 verlässt den Raum.]
-        // %2B20%2B#A#RandomUsername1#-#3#:f::##
-        // 0       1 2            3 4 5    67
-
-        // [RandomUsername2 verlässt den Raum.]
-        // %2B20%2B#A#RandomUsername2#-#3#:m::##
-        // 0        1 2           3 4 5    67
-
-        // [RandomUsername3 verlässt den Raum (Logout).]
-        // %2B20%2B#R#RandomUsername3#-#3#:m::##
-        // 0        1 2               3 4 5    67
-
-        // [RandomUsername4 verlässt den Raum (Logout).]
-        // %2B20%2B#Q#RandomUsername4#-#3#::p:##
-        // 0        1 2       3 4 5    67
-
-        // [RandomUsername5 betritt den Raum.]
-        // %2B20%2B#a#RandomUsername5#-#3#:m::##
-        // 0        1 2               3 4 5    67
-
-        if (numberOfAnchors < 7)
-        {
-            return;
-        }
-
-        std::string io;
-
-        CBaseConnector::SChatUserState userState;
-
-        utf8Username = convertCP1252toUTF8(m_pAnchors[2]);
-
-        userState.m_pRoomName = &m_pAnchors[0][1];
-        userState.m_pUsername = utf8Username;
-        userState.m_flags     = ChatUserFlag_None;
-
-        if (*m_pAnchors[1] == 'a') // enters room
-        {
-            userState.m_flags |= ChatUserFlag_Joining;
-            userState.m_flags |= ChatUserFlag_Announce;
-            io = "JOIN";
-        }
-        else if (*m_pAnchors[1] == 'A') // leaves room
-        {
-            userState.m_flags |= ChatUserFlag_Leaving;
-            io = "LEAVE";
-        }
-        else if (*m_pAnchors[1] == 'R') // leaves room logout R
-        {
-            userState.m_flags |= ChatUserFlag_Leaving;
-            userState.m_flags |= ChatUserFlag_Disconnected;
-            io = "LEAVE R";
-        }
-        else if (*m_pAnchors[1] == 'Q') // leaves room logout Q
-        {
-            userState.m_flags |= ChatUserFlag_Leaving;
-            userState.m_flags |= ChatUserFlag_Logout;
-            io = "LEAVE Q";
-        }
-        else if (*m_pAnchors[1] == 'L') // leaves room idlekick
-        {
-            userState.m_flags |= ChatUserFlag_Leaving;
-            userState.m_flags |= ChatUserFlag_IdleKick;
-            io = "LEAVE IDLEKICK";
-        }
-        else
-        {
-            io = "unknown";
-        }
-
-        rLogger.logMutexed(
-            "chat.log",
-            "CRC IN: "
-            + std::string(&m_pAnchors[0][1]) + " "
-            + io + " "
-            + std::string(m_pAnchors[2]) + " "
-            + std::string(m_pAnchors[5]) + " "
-            + std::to_string(userState.m_flags)
-        );
-
-        m_pBaseConnector->chatUserStateChange(&userState, 1);
+        Log::error("conn_interpreter") << "cmd \"g\" seems to miss some anchors, count == " << m_numberOfAnchors << Log::end;
+        return;
     }
-    else if (pCmd[0] == 'g') // raum-nachricht
+
+    const char* utf8Username = convertCP1252toUTF8(m_pAnchors[1]);
+
+    CLogger::getInstance().logMutexed(
+        "chat.log",
+        "CRM IN: "
+        + std::string(&m_pAnchors[0][1])
+        + " " + std::string(m_pAnchors[1])
+        + " " + std::string(m_pAnchors[3])
+        + " " + std::string(m_pAnchors[4])
+    );
+
+    switch (*(m_pAnchors[3]))
     {
-        // gRandomRoomname # RandomUsername # 3 # a # RandomMessage
-        // 0                 1                2   3   4
-
-        if (numberOfAnchors < 4)
-        {
-            return;
-        }
-
-        utf8Username = convertCP1252toUTF8(m_pAnchors[1]);
-
-        rLogger.logMutexed(
-            "chat.log",
-            "CRM IN: "
-            + std::string(&m_pAnchors[0][1])
-            + " " + std::string(m_pAnchors[1])
-            + " " + std::string(m_pAnchors[3])
-            + " " + std::string(m_pAnchors[4])
-        );
-
-        switch (*(m_pAnchors[3]))
-        {
-            case 'a':
-                m_pBaseConnector->chatAddMessage(&m_pAnchors[0][1], utf8Username, *m_pAnchors[3], m_pAnchors[4]);
-                break;
-            case '0':
-                CPurpleConnector::SChatUserState chatUserState;
-                chatUserState.m_pRoomName = &m_pAnchors[0][1];
-                chatUserState.m_pUsername = utf8Username;
-                chatUserState.m_flags = Spin::ChatUserFlag_Away;
-                m_pBaseConnector->chatUserStateChange(&chatUserState, 1);
-                break;
-            default:
-                rLogger.logMutexed("chat.log", "CRM IN: previous message-type unsupported yet");
-                m_pBaseConnector->chatAddMessage(&m_pAnchors[0][1], utf8Username, *m_pAnchors[3], m_pAnchors[4]);
-                break;
-        }
-
-    }
-    else if (pCmd[0] == 'h') // dialog-stuff
-    {
-        // hRandomUsername # 0 # 256 # 0 # check
-        // 0                 1   2     3   4
-        // hRandomUsername # 0 # 256 # 0 # keypress # 1
-        // 0                 1   2     3   4          5
-        // hRandomUsername # 0 # 256 # a # RandomMessage
-        // 0                 1   2     3   4
-
-        utf8Username = convertCP1252toUTF8(&m_pAnchors[0][1]);
-
-        if (*m_pAnchors[1] == '0') // in
-        {
-            if (*m_pAnchors[3] == '0') // some command?
-            {
-                std::cout << m_pAnchors[4] << std::endl;
-
-                if (strcmp(m_pAnchors[4], "check") == 0) // TODO, not sure, might be a blocked (ignored) user
-                {
-
-                }
-                else if (strcmp(m_pAnchors[4], "keypress") == 0)
-                {
-                    rLogger.logMutexed(
-                        "chat.log",
-                        "PC IN: "
-                        + std::string(&m_pAnchors[0][1])
-                        + " KEYPRESS=" + m_pAnchors[5]);
-
-                    m_pBaseConnector->imSetTypingState(utf8Username, m_pAnchors[5][0] == '1' ? Typing_Typing : Typing_Nothing);
-                }
-                else
-                {
-                    std::cout << "unknown command: " << pEscapedLine << std::endl;
-                }
-            }
-            else // a message
-            {
-                rLogger.logMutexed(
-                    "chat.log",
-                    "PCM IN: "
-                    + std::string(m_pAnchors[3]) + " "
-                    + std::string(&m_pAnchors[0][1]) + " "
-                    + std::string(m_pAnchors[4])
-                );
-
-                m_pBaseConnector->imAddMessage(utf8Username, m_pAnchors[3][0], m_pAnchors[4]);
-            }
-        }
-        else if (*m_pAnchors[1] == '1') // out
-        {
-
-        }
-        else
-        {
-            std::cout << "inOrOut is neither 1 or 0: " << pEscapedLine << std::endl;
-        }
-    }
-    else if (pCmd[0] == 'j')
-    {
-        interpretInLine_j(numberOfAnchors);
-    }
-    else if (pCmd[0] == '=')
-    {
-        // %3Dh#RandomUsername
-        // user logs out
-
-        // %3Dg#RandomUsername
-        // user logs in
-
-        utf8Username = convertCP1252toUTF8(m_pAnchors[1]);
-
-        CBaseConnector::SBuddyState buddyState;
-        buddyState.m_name  = utf8Username;
-        buddyState.m_flags = BuddyFlag_None;
-
-        if (m_pAnchors[0][1] == 'h')
-        {
-            buddyState.m_flags |= BuddyFlag_Offline;
-            m_pBaseConnector->buddyStateChange(&buddyState);
-            rLogger.logMutexed("chat.log", "B: " + buddyState.m_name + " goes offline");
-        }
-        else if (m_pAnchors[0][1] == 'g')
-        {
-            buddyState.m_flags |= BuddyFlag_Online;
-            m_pBaseConnector->buddyStateChange(&buddyState);
-            rLogger.logMutexed("chat.log", "B: " + buddyState.m_name + " comes online");
-        }
-        else if (m_pAnchors[0][1] == 'k')
-        {
-            // TODO (maybe reconnect)
-        }
-    }
-    else if (pCmd[0] == '>') //%3E
-    {
-        if (pCmd[1] == 'q')
-        {
-            // Incoming Mail
-            //    SETTING ACK: 85
-            //    LINE: %3Eq#RandomUsername#user#8235908#1#
-            //    LINE: T#s#86
-            //    SETTING ACK: 86
-            //    LINE: %3Ep#1
-            //    LINE: T#s#87
-            //    SETTING ACK: 87
-            //    LINE: %3Eq#RandomUsername#user#8235908#1#
-            //    LINE: T#s#88
-
-        }
-        else if (pCmd[1] == 'l')
-        {
-            // if Buddy removed you (without letting notify you) or buddy authorized your buddy-request
-            // refresh buddy-list
-            m_pInternJobQueue->push(InternJob_RefreshBuddies);
-        }
-        else if (pCmd[1] == 'e')
-        {
-
-            // ISO-8859-15
-            utf8Username = convertCP1252toUTF8(m_pAnchors[1]);
-
-//            size_t index = 0;
-//            while (m_pAnchors[1][index] != '\0')
-//            {
-//                std::cout << m_pAnchors[1][index] << " " << +m_pAnchors[1][index] << std::endl;
-//                ++ index;
-//            }
-//
-//            index = 0;
-//            while (utf8Username[index] != '\0')
-//            {
-//                std::cout << utf8Username[index] << " " << +utf8Username[index] << std::endl;
-//                ++ index;
-//            }
-
-            CBaseConnector::SBuddyState buddyState;
-            buddyState.m_name  = utf8Username;
-            buddyState.m_flags = BuddyFlag_AskAuth;
-
-            m_pBaseConnector->buddyStateChange(&buddyState);
-            // https://github.com/felipec/msn-pecan/blob/master/msn.c#L1428
-            // buddy-request
-            // LINE: %3Ee#RandomUsername
-
-            //        <a rel="nofollow" class="button" data-action="accept" data-request-id="36323752" data-request-type="0" data-request-who="RandomUsername" href="/request/accept?id=36323752;secret=8293a672b93768ef23865951a9523687">Freundschaft&nbsp;annehmen</a>
-            //        id:36323752;secret=8293a672b93768ef23865951a9523687;private=1;familiar=0
-        }
-
-
-    }
-    else if (pCmd[0] == ';')
-    {
-        ++ m_semicolonCount;
-
-        if (_rLine.length() > 4094)
-        {
-            Spin::Job::SInitConnection initConnection;
-
-            initConnection.m_username = "Raum";
-            initConnection.m_sid      = m_pCookie->getCookie("session1");
-            initConnection.m_version  = m_version;
-
-            Job::SHearthbeat heartbeat;
-
-            Spin::pushJob(this, &initConnection);
-            pushOut("u%23%23#%0Au%23e%23");
-            Spin::pushJob(this, &heartbeat);
-
-            m_pBaseConnector->setConnectionState(ConnectionState_Connected);
-        }
+        case 'a':
+            m_pBaseConnector->chatAddMessage(&m_pAnchors[0][1], utf8Username, *m_pAnchors[3], m_pAnchors[4]);
+            break;
+        case '0':
+            CPurpleConnector::SChatUserState chatUserState;
+            chatUserState.m_pRoomName = &m_pAnchors[0][1];
+            chatUserState.m_pUsername = utf8Username;
+            chatUserState.m_flags = Spin::ChatUserFlag_Away;
+            m_pBaseConnector->chatUserStateChange(&chatUserState, 1);
+            break;
+        default:
+            Log::error("conn_interpreter") << "unhandled cmd in \"g\" m_pAnchors[3] == " << *m_pAnchors[3] << Log::end;
+//                rLogger.logMutexed("chat.log", "CRM IN: previous message-type unsupported yet");
+            m_pBaseConnector->chatAddMessage(&m_pAnchors[0][1], utf8Username, *m_pAnchors[3], m_pAnchors[4]);
+            break;
     }
 
 }
 
-void CConnector::interpretInLine_j(size_t _numberOfAnchors)
+void CConnector::interpretInLine_h()
+{
+    // hRandomUsername # 0 # 256 # 0 # check
+    // 0                 1   2     3   4
+    // hRandomUsername # 0 # 256 # 0 # keypress # 1
+    // 0                 1   2     3   4          5
+    // hRandomUsername # 0 # 256 # a # RandomMessage
+    // 0                 1   2     3   4
+
+    const char* utf8Username = convertCP1252toUTF8(&m_pAnchors[0][1]);
+
+    if (*m_pAnchors[1] == '0') // in
+    {
+        if (*m_pAnchors[3] == '0') // some command?
+        {
+            std::cout << m_pAnchors[4] << std::endl;
+
+            if (strcmp(m_pAnchors[4], "check") == 0) // TODO, not sure, might be a blocked (ignored) user
+            {
+                Log::error("conn_interpreter") << "unhandled cmd in \"h\" m_pAnchors[4] == " << *m_pAnchors[4]  << Log::end;
+            }
+            else if (strcmp(m_pAnchors[4], "keypress") == 0)
+            {
+                CLogger::getInstance().logMutexed(
+                    "chat.log",
+                    "PC IN: "
+                    + std::string(&m_pAnchors[0][1])
+                    + " KEYPRESS=" + m_pAnchors[5]);
+
+                m_pBaseConnector->imSetTypingState(utf8Username, m_pAnchors[5][0] == '1' ? Typing_Typing : Typing_Nothing);
+            }
+            else
+            {
+                Log::error("conn_interpreter") << "unhandled cmd in \"h\" m_pAnchors[4] == " << *m_pAnchors[4] << Log::end;
+            }
+        }
+        else // a message
+        {
+            CLogger::getInstance().logMutexed(
+                "chat.log",
+                "PCM IN: "
+                + std::string(m_pAnchors[3]) + " "
+                + std::string(&m_pAnchors[0][1]) + " "
+                + std::string(m_pAnchors[4])
+            );
+
+            m_pBaseConnector->imAddMessage(utf8Username, m_pAnchors[3][0], m_pAnchors[4]);
+        }
+    }
+    else if (*m_pAnchors[1] == '1') // out
+    {
+        Log::error("conn_interpreter") << "unhandled cmd in \"h\" m_pAnchors[4] == " << *m_pAnchors[4] << Log::end;
+    }
+    else
+    {
+        Log::error("conn_interpreter") << "unhandled cmd in \"h\" m_pAnchors[4] == " << *m_pAnchors[4]  << Log::end;
+    }
+}
+
+void CConnector::interpretInLine_j()
 {
     // list of users in the channel at the moment of joining
     // j20%2B#RandomUserName1:3::m::#RandomUserName2:3::m::#RandomUserName3:3::m::#RandomUserName4:3::m::#RandomUserName5:3::m::#RandomUserName6:3::m::#RandomUserName7:3::m::#RandomUserName8:3::m::#RandomUserName9:3::m:p:RandomUserName10:3::m::#RandomUserName11:3::m::#RandomUserName12:3::m::#RandomUserName13:3::m:p#:RandomUserName14:3::m::#RandomUserName15:3::m::#
@@ -1159,7 +941,7 @@ void CConnector::interpretInLine_j(size_t _numberOfAnchors)
 
     SChatter chatter;
 
-    for (size_t indexOfAnchors = 1; indexOfAnchors < _numberOfAnchors - 1; ++ indexOfAnchors)
+    for (size_t indexOfAnchors = 1; indexOfAnchors < m_numberOfAnchors - 1; ++ indexOfAnchors)
     {
         logMessage += '\n';
 
@@ -1218,50 +1000,266 @@ void CConnector::interpretInLine_j(size_t _numberOfAnchors)
 
     CLogger::getInstance().logMutexed(
         "chat.log",
-        "numberofAnchors=" + std::to_string(_numberOfAnchors)
+        "numberofAnchors=" + std::to_string(m_numberOfAnchors)
     );
 
     m_pBaseConnector->chatJoin(pChatRoomName);
-    m_pBaseConnector->chatUserStateChange(&userStates[0], _numberOfAnchors - 2);
+    m_pBaseConnector->chatUserStateChange(&userStates[0], m_numberOfAnchors - 2);
 
-    for (size_t indexOfAnchors = 1; indexOfAnchors < _numberOfAnchors - 1; ++ indexOfAnchors)
+    for (size_t indexOfAnchors = 1; indexOfAnchors < m_numberOfAnchors - 1; ++ indexOfAnchors)
     {
         CBaseConnector::SChatUserState& rCurrentUserState = userStates[indexOfAnchors - 1];
         delete[] rCurrentUserState.m_pUsername;
     }
 }
 
-void CConnector::pushOut(const std::string& _rMessage)
+void CConnector::interpretInLine_T()
 {
-    m_outMessageMutex.lock();
-    m_pOutQueue->push(_rMessage);
-    m_outMessageMutex.unlock();
-}
-
-void CConnector::pushOut(std::string&& _rrMessage)
-{
-    m_outMessageMutex.lock();
-    m_pOutQueue->push(_rrMessage);
-    m_outMessageMutex.unlock();
-}
-
-void CConnector::pushJob(Job::SBaseJob* _pJob)
-{
-    assert(_pJob != nullptr);
-
-    Log::info("sys") << "locking outMessageMutex" << Log::end;
-    m_outMessageMutex.lock();
-    Log::info("sys") << "locked outMessageMutex" << Log::end;
-
-    if (_pJob->m_type == Job::JobType_Mixed)
+    // T#s#Number -> ack
+    // 0 1 2
+    if (*m_pAnchors[1] == 's')
     {
-        Log::info("sys") << "push MixedJob" << Log::end;
-        m_pMixedJobQueue->push(_pJob);
+        setMessageID(atoi(m_pAnchors[2]));
+        Log::info("conn_interpreter") << "setting ack to " << getMessageID() << Log::end;
+    }
+    // T#c# -> snd
+    else if (*m_pAnchors[1] == 'c')
+    {
+        int snd = atoi(m_pAnchors[2]);
+
+        if (getSndID() != snd)
+        {
+            std::cout << snd << std::endl;
+        }
+        setSndID(snd + 1);
+        Log::info("conn_interpreter") << "setting snd to " << getSndID() << Log::end;
+    }
+    else
+    {
+        Log::error("conn_interpreter") << "unhandled cmd in \"T\" m_pAnchors[1] == " << *m_pAnchors[1] << Log::end;
+    }
+}
+
+void CConnector::interpretInLine_x()
+{
+    // xUsername
+    // user is offline
+    m_pBaseConnector->imAddStatusMessage(&m_pAnchors[0][1], Spin::IMSystemFlag_Offline);
+}
+
+void CConnector::interpretInLine_plus()
+{
+    // [RandomUsername1 verlässt den Raum.]
+    // %2B20%2B#A#RandomUsername1#-#3#:f::##
+    // 0       1 2            3 4 5    67
+
+    // [RandomUsername2 verlässt den Raum.]
+    // %2B20%2B#A#RandomUsername2#-#3#:m::##
+    // 0        1 2           3 4 5    67
+
+    // [RandomUsername3 verlässt den Raum (Logout).]
+    // %2B20%2B#R#RandomUsername3#-#3#:m::##
+    // 0        1 2               3 4 5    67
+
+    // [RandomUsername4 verlässt den Raum (Logout).]
+    // %2B20%2B#Q#RandomUsername4#-#3#::p:##
+    // 0        1 2       3 4 5    67
+
+    // [RandomUsername5 betritt den Raum.]
+    // %2B20%2B#a#RandomUsername5#-#3#:m::##
+    // 0        1 2               3 4 5    67
+
+    if (m_numberOfAnchors < 7)
+    {
+        Log::error("conn_interpreter") << "cmd \"+\" seems to miss some anchors, count == " << m_numberOfAnchors << Log::end;
+        return;
     }
 
-    Log::info("sys") << "unlocking outMessageMutex" << Log::end;
-    m_outMessageMutex.unlock();
-    Log::info("sys") << "unlocked outMessageMutex" << Log::end;
+    std::string io;
+
+    CBaseConnector::SChatUserState userState;
+
+    const char* utf8Username = convertCP1252toUTF8(m_pAnchors[2]);
+
+    userState.m_pRoomName = &m_pAnchors[0][1];
+    userState.m_pUsername = utf8Username;
+    userState.m_flags     = ChatUserFlag_None;
+
+    switch (*m_pAnchors[1])
+    {
+        case 'a':
+            userState.m_flags |= ChatUserFlag_Joining;
+            userState.m_flags |= ChatUserFlag_Announce;
+            io = "JOIN";
+            break;
+        case 'A':
+            userState.m_flags |= ChatUserFlag_Leaving;
+            io = "LEAVE";
+            break;
+        case 'R':
+            userState.m_flags |= ChatUserFlag_Leaving;
+            userState.m_flags |= ChatUserFlag_Disconnected;
+            io = "LEAVE R";
+            break;
+        case 'Q':
+            userState.m_flags |= ChatUserFlag_Leaving;
+            userState.m_flags |= ChatUserFlag_Logout;
+            io = "LEAVE Q";
+            break;
+        case 'L':
+            userState.m_flags |= ChatUserFlag_Leaving;
+            userState.m_flags |= ChatUserFlag_IdleKick;
+            io = "LEAVE IDLEKICK";
+            break;
+        case 'B':
+            userState.m_flags |= ChatUserFlag_Leaving;
+            userState.m_flags |= ChatUserFlag_KickedByOp;
+            io = "LEAVE KICK BY OP";
+            break;
+        case 'D':
+            // can't join room because of ban/tempban
+            Log::error("conn_interpreter") << "unhandled cmd in \"+\" m_pAnchors[1] == " << *m_pAnchors[1] << Log::end;
+            io = "D";
+            break;
+        default:
+            Log::error("conn_interpreter") << "unhandled cmd in \"+\" m_pAnchors[1] == " << *m_pAnchors[1] << Log::end;
+            io = "unknown";
+            break;
+    }
+
+    if (((userState.m_flags & ChatUserFlag_Leaving) == ChatUserFlag_Leaving) && strcasecmp(userState.m_pUsername, m_pUsername) == 0)
+    {
+        m_pBaseConnector->chatLeave(userState.m_pRoomName, &userState);
+    }
+
+    Log::info("conn_interpreter") << "chat user state change; "
+                                  << std::string(&m_pAnchors[0][1]) << " "
+                                  << io << " "
+                                  << std::string(m_pAnchors[2]) << " "
+                                  << std::string(m_pAnchors[5]) << " "
+                                  << userState.m_flags << Log::end;
+
+    m_pBaseConnector->chatUserStateChange(&userState, 1);
+}
+
+void CConnector::interpretInLine_equals()
+{
+    // %3Dh#RandomUsername
+    // user logs out
+
+    // %3Dg#RandomUsername
+    // user logs in
+
+    const char* utf8Username = convertCP1252toUTF8(m_pAnchors[1]);
+
+    CBaseConnector::SBuddyState buddyState;
+    buddyState.m_name  = utf8Username;
+    buddyState.m_flags = BuddyFlag_None;
+
+    switch (m_pAnchors[0][1])
+    {
+        case 'h':
+            buddyState.m_flags |= BuddyFlag_Offline;
+            m_pBaseConnector->buddyStateChange(&buddyState);
+            CLogger::getInstance().logMutexed("chat.log", "B: " + buddyState.m_name + " goes offline");
+            break;
+        case 'g':
+            buddyState.m_flags |= BuddyFlag_Online;
+            m_pBaseConnector->buddyStateChange(&buddyState);
+            CLogger::getInstance().logMutexed("chat.log", "B: " + buddyState.m_name + " comes online");
+            break;
+        case 'k':
+            Log::error("conn_interpreter") << "unhandled cmd in \"=\" m_pAnchors[0][1] == " << m_pAnchors[0][1] << Log::end;
+            // TODO (maybe reconnect)
+            break;
+        default:
+            Log::error("conn_interpreter") << "unhandled cmd in \"=\" m_pAnchors[0][1] == " << m_pAnchors[0][1] << Log::end;
+            break;
+    }
+}
+
+void CConnector::interpretInLine_biggerThan()
+{
+    switch (m_pAnchors[0][1])
+    {
+        case 'q':
+            // Incoming Mail
+            //    SETTING ACK: 85
+            //    LINE: %3Eq#RandomUsername#user#8235908#1#
+            //    LINE: T#s#86
+            //    SETTING ACK: 86
+            //    LINE: %3Ep#1
+            //    LINE: T#s#87
+            //    SETTING ACK: 87
+            //    LINE: %3Eq#RandomUsername#user#8235908#1#
+            //    LINE: T#s#88
+
+            Log::error("conn_interpreter") << "unhandled cmd in \">\" m_pAnchors[0][1] == " << m_pAnchors[0][1] << Log::end;
+            break;
+        case 'l':
+            {
+                // if Buddy removed you (without letting notify you) or buddy authorized your buddy-request
+                // refresh buddy-list
+                pushJob(Job::SRefreshBuddyList());
+            }
+            break;
+        case 'e':
+            {
+                // ISO-8859-15
+                const char* utf8Username = convertCP1252toUTF8(m_pAnchors[1]);
+
+                //            size_t index = 0;
+                //            while (m_pAnchors[1][index] != '\0')
+                //            {
+                //                std::cout << m_pAnchors[1][index] << " " << +m_pAnchors[1][index] << std::endl;
+                //                ++ index;
+                //            }
+                //
+                //            index = 0;
+                //            while (utf8Username[index] != '\0')
+                //            {
+                //                std::cout << utf8Username[index] << " " << +utf8Username[index] << std::endl;
+                //                ++ index;
+                //            }
+
+                CBaseConnector::SBuddyState buddyState;
+                buddyState.m_name = utf8Username;
+                buddyState.m_flags = BuddyFlag_AskAuth;
+
+                m_pBaseConnector->buddyStateChange(&buddyState);
+                // https://github.com/felipec/msn-pecan/blob/master/msn.c#L1428
+                // buddy-request
+                // LINE: %3Ee#RandomUsername
+
+                //        <a rel="nofollow" class="button" data-action="accept" data-request-id="36323752" data-request-type="0" data-request-who="RandomUsername" href="/request/accept?id=36323752;secret=8293a672b93768ef23865951a9523687">Freundschaft&nbsp;annehmen</a>
+                //        id:36323752;secret=8293a672b93768ef23865951a9523687;private=1;familiar=0
+            }
+            break;
+        default:
+            Log::error("conn_interpreter") << "unhandled cmd in \">\" pCmd[1] == " << m_pAnchors[0][1]  << Log::end;
+            break;
+    }
+}
+
+void CConnector::interpretInLine_semicolon(size_t _lineLength)
+{
+    ++ m_semicolonCount;
+
+    if (_lineLength > 4094)
+    {
+        Message::SHearthbeat heartbeat;
+        Message::SInitConnection initConnection;
+
+        initConnection.m_username = "Raum";
+        initConnection.m_sid      = m_pCookie->getCookie("session1");
+        initConnection.m_version  = m_version;
+
+        pushOut(initConnection);
+        pushOut2("u%23%23#%0Au%23e%23");
+        pushOut(heartbeat);
+
+        m_pBaseConnector->setConnectionState(ConnectionState_Connected);
+    }
 }
 
 void CConnector::execHomeRequest(bool _sync, CConnector::SHomeRequestResult& _rResult)
@@ -1436,122 +1434,56 @@ const std::string CConnector::getCookie(const std::string& _rString)
     return m_pCookie->getCookie(_rString);
 }
 
-void CConnector::requestBuddyListUpdate()
+void CConnector::setUserInfo(const std::string& _rUserName, SUserInfo& _rUserInfo)
 {
-    Spin::CLogger& rLogger = Spin::CLogger::getInstance();
-    Spin::CHttpRequest httpRequest;
-    std::string result;
+    auto userInfoIt = m_userInfos.find(_rUserName);
+//    bool requestImage;
 
-    rLogger.logMutexed("spinp_debug.log", "on requestBuddyListUpdate 1");
-//General:
-//    Request URL:http://www.spin.de/api/friends
-//    Request Method:POST
-//    Status Code:200 OK
-//    Remote Address:213.95.79.92:80
+    // FIXME Icon will always loaded on restarting pidgin
 
-//Headers:
-//Accept:application/json, text/javascript, */*; q=0.01
-//Accept-Encoding:gzip, deflate
-//Accept-Language:de-DE,de;q=0.8,en-US;q=0.6,en;q=0.4
-//Cache-Control:no-cache
-//Connection:keep-alive
-//Content-Length:74
-//Content-Type:application/x-www-form-urlencoded; charset=UTF-8
-//Cookie:...
-//Host:www.spin.de
-//Origin:http://www.spin.de
-//Pragma:no-cache
-//Referer:http://www.spin.de/loggedin
-//User-Agent:...
-//X-Requested-With:XMLHttpRequest
-
-//Form Data:
-//    session:ux3zgAJD5TYYchxegurAxghtFDwNVA5hG1dESJtMinhw9092396
-//    photo:1
-//    utf8:1
-
-    httpRequest.setQuery("api/friends");
-    httpRequest.setFollow(true);
-    httpRequest.setPostRedirect(true);
-    httpRequest.setHeader("Accept", "application/json, text/javascript, */*; q=0.01");
-    httpRequest.setHeader("Accept-Encoding", "");
-    httpRequest.setHeader("Cache-Control", "no-cache");
-    httpRequest.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-    httpRequest.setHeader("Origin", "http://www.spin.de");
-    httpRequest.setHeader("Pragma", "no-cache");
-    httpRequest.setHeader("Referer", "http://www.spin.de/loggedin");
-    httpRequest.setHeader("X-Requested-With", "XMLHttpRequest");
-
-    httpRequest.setPostParameter("session", getCookie("session1"));
-    httpRequest.setPostParameter("photo", "1");
-    httpRequest.setPostParameter("utf8", "1");
-
-    if (!httpRequest.execSync(&result))
+    if (userInfoIt == m_userInfos.cend())
     {
-        rLogger.log("spinp_debug.log", "api-friends-request failed");
-        return;
+        m_userInfos.emplace(std::make_pair(_rUserName, _rUserInfo));
+        userInfoIt = m_userInfos.find(_rUserName);
+//        requestImage = true;
+    }
+    else
+    {
+//        requestImage = userInfoIt->second.m_thumbURL != _rUserInfo.m_thumbURL;
+        userInfoIt->second = _rUserInfo;
     }
 
-    // [
-    //      [3428590,"RandomUsername1",1,"",0  ,""                                                         ,"y",1],
-    //      [35806  ,"RandomUsername2",0,"",34 ,"\/\/p2.spin.de\/user\/mini\/e4\/0f\/71957025-23623632.jpg","y",1],
-    //      [843569 ,"RandomUsername3",0,"",245,""                                                         ,"y",1]
-    // ]
+    SUserInfo& rUserInfo = userInfoIt->second;
 
-    rLogger.logMutexed("spinp_debug.log", "on requestBuddyListUpdate 2");
-    rLogger.logMutexed("spinp_debug.log", result);
-    nlohmann::json jsonObject = nlohmann::json::parse(result);
-
-    rLogger.logMutexed("spinp_debug.log", "on requestBuddyListUpdate 2.1");
-
-    std::vector<CBaseConnector::SBuddyState> buddyList;
-
-    rLogger.logMutexed("spinp_debug.log", "on requestBuddyListUpdate 3");
-    for (auto& current : jsonObject)
+//    if (rUserInfo.m_registered)
+//    {
+//        if (requestImage && rUserInfo.m_thumbURL.length() > 0)
+//        {
+//            Job::SRequestBuddyImage* pJob = new Job::SRequestBuddyImage();
+//            pJob->m_userName = _rUserName;
+//            pJob->m_url      = rUserInfo.m_thumbURL;
+//            Spin::pushJob(this, pJob);
+//        }
+//    }
+//    else
+    if (!rUserInfo.m_registered)
     {
-        if (current.is_array())
-        {
-            CBaseConnector::SBuddyState buddyState;
-            buddyState.m_flags = BuddyFlag_None;
-
-            auto& el = current.at(0);;
-            if (el.is_number()) buddyState.m_id = el.get<int>();
-            else                buddyState.m_id = -1;
-
-            el = current.at(1);
-            if (el.is_string()) buddyState.m_name = el.get<std::string>();
-            else
-            {
-                buddyState.m_name = "";
-                continue;
-            }
-
-            buddyState.m_name = convertASCIIWithEscapedUTF16toUTF8(buddyState.m_name);
-
-            el = current.at(2);
-//            if (el.is_number()) buddyData.m_isOnline = el.get<int>();
-//            else                buddyData.m_isOnline = 0;
-            int isOnline = 0;
-            if (el.is_number()) isOnline = el.get<int>();
-            if (isOnline) buddyState.m_flags |= BuddyFlag_Online ;
-            else          buddyState.m_flags |= BuddyFlag_Offline;
-
-            el = current.at(5);
-//            if (!el.is_string()) buddyData.m_thumbnailURL = el.get<std::string>();
-//            else                 buddyData.m_thumbnailURL = "";
-
-            buddyList.push_back(buddyState);
-        }
+        m_pBaseConnector->lock();
+        m_pBaseConnector->imAddStatusMessage(_rUserName.c_str(), Spin::IMSystemFlag_NotRegistered);
+        m_pBaseConnector->unlock();
     }
-
-    m_pBaseConnector->lock();
-    m_pBaseConnector->buddyListRefresh(buddyList);
-    m_pBaseConnector->unlock();
 }
 
 unsigned int CConnector::getSemicolonCount()
 {
     return m_semicolonCount.load();
+}
+
+void CConnector::pushOut2(std::string&& _rMessage)
+{
+    m_outMessageMutex.lock();
+    m_pOutQueue->push(std::move(_rMessage));
+    m_outMessageMutex.unlock();
 }
 
 }

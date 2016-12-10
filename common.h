@@ -37,6 +37,11 @@ std::string urlEncode(const std::string& _rString);
 
 std::string urlDecode(const std::string& _rString);
 
+std::string hexEncode(const std::string& _rString);
+//size_t stdStringFind(const std::string& _rString, const std::string& _rSearch, size_t _offset = 0);
+//size_t stdStringFind(const std::string& _rString, const char* _pSearch, size_t _offset = 0);
+
+
 }
 
 #endif // SPINTEST_COMMON_H

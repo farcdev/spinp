@@ -134,11 +134,17 @@ public:
         return *this;
     }
 
-    inline CLogger& operator << (int8_t _integer)
+    inline CLogger& operator << (char _char)
     {
-        s_pStreamMessage->append(std::to_string(_integer));
+        s_pStreamMessage->append(&_char, 1);
         return *this;
     }
+
+//    inline CLogger& operator << (int8_t _integer)
+//    {
+//        s_pStreamMessage->append(std::to_string(_integer));
+//        return *this;
+//    }
 
     inline CLogger& operator << (int16_t _integer)
     {

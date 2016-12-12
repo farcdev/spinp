@@ -51,7 +51,7 @@ void CCookie::addCookie(std::string&& _rrKey, std::string&& _rrValue)
     m_changed = true;
 }
 
-std::string CCookie::getCookie(const std::string& _rKey)
+std::string CCookie::getCookie(const std::string& _rKey) const
 {
     auto cookieIt = m_cookies.find(_rKey);
 

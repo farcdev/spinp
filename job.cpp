@@ -780,6 +780,109 @@ bool SUpdateUserInfo::run(CConnector* _pConnector)
 //    char* pData = result.data();
 }
 
+bool SLoadLoggedInPage::run(CConnector* _pConnector)
+{
+    size_t pos, endPos;
+    std::string content;
+    CHttpRequest request;
+
+    request.setQuery("loggedin");
+    request.setHeader("Cache-Control", "max-age=0");
+    request.setHeader("DNT", "1");
+    request.setHeader("Cookie", _pConnector->getCookie());
+
+    if (!request.execSync(&content))
+    {
+        Log::error("request_loggedin") << "request failed" << Log::end;
+        return false;
+    }
+
+    const size_t maxUserNameLength = 256;
+
+    char userName[maxUserNameLength];
+
+    std::string secret;
+    pos = content.find("secret=") + 7;
+    while (content[pos] != '"' && pos != std::string::npos)
+    {
+        secret.push_back(content[pos]);
+        ++ pos;
+    }
+
+    // "friends": [[8902635,"someUsername",1,"",0,"","y",1],[3589301,"D\u00e4mmerle",1,"",0,"","y",1]],
+
+    Log::info("request_loggedin") << "parsing buddies:\n" << Log::end;
+    std::vector<CBaseConnector::SBuddyState> buddyList;
+
+    pos = content.find("\"friends\":") + 13;
+    if (pos != std::string::npos)
+    {
+        endPos = content.find("]],", pos);
+        if (endPos != std::string::npos)
+        {
+            while (pos < endPos)
+            {
+                for (; pos != endPos; ++ pos)
+                {
+                    if (content[pos] == ',')
+                        break;
+                }
+
+                ++ pos;
+                ++ pos;
+
+                for (size_t indexOfUserName = 0; pos != endPos || indexOfUserName == 64; ++ indexOfUserName)
+                {
+                    userName[indexOfUserName] = content[pos];
+
+                    if (content[pos] == '"')
+                    {
+                        userName[indexOfUserName] = '\0';
+                        break;
+                    }
+
+                    ++ pos;
+                }
+
+                ++ pos;
+                ++ pos;
+
+                CBaseConnector::SBuddyState buddyState;
+                buddyState.m_flags = BuddyFlag_None;
+
+                if (content[pos] == '1') buddyState.m_flags |= BuddyFlag_Online;
+                else                     buddyState.m_flags |= BuddyFlag_Offline;
+
+                for (; pos != endPos; ++ pos)
+                {
+                    if (content[pos] == ']')
+                    {
+                        pos += 3;
+                        break;
+                    }
+                }
+
+                buddyState.m_name = convertASCIIWithEscapedUTF16toUTF8(userName);
+
+                Log::write() << "\t" << buddyState.m_name << "(" << userName << ") - flags: " << buddyState.m_flags;
+
+                buddyList.push_back(buddyState);
+            }
+        }
+    }
+
+    Log::write() << Log::end;
+
+    _pConnector->setSecret(secret.c_str());
+
+    Spin::CBaseConnector* pBaseConnector = _pConnector->getBaseConnector();
+
+    pBaseConnector->lock();
+    pBaseConnector->buddyListRefresh(buddyList);
+    pBaseConnector->unlock();
+
+    return true;
+}
 
 CJob::CJob()
     : m_pJob(nullptr)

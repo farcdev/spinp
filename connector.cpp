@@ -197,22 +197,24 @@ void CConnector::setLogin(const char* _pUsername, const char* _pPassword, unsign
 
 bool CConnector::start()
 {
-    if (!login())
-    {
-        return false;
-    }
+    return initThreads();
 
-    return this->initConnection();
+//    if (!login())
+//    {
+//        return false;
+//    }
+//
+//    return this->initConnection();
 }
 
-bool CConnector::login()
+CConnector::ELoginRC CConnector::login()
 {
     assert(m_pUsername != nullptr);
     assert(m_pPassword != nullptr);
     assert(m_port      != 0      );
 
-    if (strlen(m_pUsername) == 0) return false;
-    if (strlen(m_pPassword) == 0) return false;
+    if (strlen(m_pUsername) == 0) return LoginRC_FailedAuth;
+    if (strlen(m_pPassword) == 0) return LoginRC_FailedAuth;
 
     CHttpRequest requestLogin;
     CHttpRequest requestLoginScreen;
@@ -226,7 +228,7 @@ bool CConnector::login()
 
     if (!requestLoginScreen.execSync(&content, &header))
     {
-        return false;
+        return LoginRC_InvalidResponse;
     }
 
     size_t pos, endPos;
@@ -249,14 +251,14 @@ bool CConnector::login()
         if (pos == std::string::npos)
         {
             Log::error("request_loginscreen") << "couldn't find '<form' in response-body" << Log::end;
-            return false;
+            return LoginRC_InvalidResponse;
         }
 
         endPos = content.find("loginform", pos);
         if (endPos == std::string::npos)
         {
             Log::error("request_loginscreen") << "couldn't find 'loginform' in response-body" << Log::end;
-            return false;
+            return LoginRC_InvalidResponse;
         }
 
         if (endPos - pos > 100)
@@ -268,7 +270,7 @@ bool CConnector::login()
         if (endPos == std::string::npos)
         {
             Log::error("request_loginscreen") << "couldn't find '</form>' in response-body" << Log::end;
-            return false;
+            return LoginRC_InvalidResponse;
         }
 
         form = content.substr(pos, endPos - pos);
@@ -300,7 +302,6 @@ bool CConnector::login()
 
 
     auto endOfHiddenFields = hiddenFields.cend();
-
     for (auto currentHiddenField = hiddenFields.cbegin(); currentHiddenField != endOfHiddenFields; ++ currentHiddenField)
     {
         requestLogin.setPostParameter(currentHiddenField->first, currentHiddenField->second);
@@ -329,7 +330,17 @@ bool CConnector::login()
 
     if (!requestLogin.execSync(nullptr, &header))
     {
-        return false;
+        return LoginRC_InvalidResponse;
+    }
+
+    if (header.find("login/failed?user=") != std::string::npos)
+    {
+        return LoginRC_FailedAuth;
+    }
+
+    if (header.find("login/notreg?user=") != std::string::npos)
+    {
+        return LoginRC_Unregistered;
     }
 
     const size_t numberOfCookies = 5;
@@ -365,7 +376,7 @@ bool CConnector::login()
 
     // TODO check if any cookies are missing
 
-    return true;
+    return LoginRC_OK;
 }
 
 bool CConnector::initLoggedIn()
@@ -388,7 +399,6 @@ bool CConnector::initLoggedIn()
     const size_t maxUserNameLength = 256;
 
     char userName[maxUserNameLength];
-
 
     pos = content.find("secret=") + 7;
     char* secret = &m_secret[0];
@@ -472,6 +482,43 @@ bool CConnector::initLoggedIn()
     return true;
 }
 
+bool CConnector::initThreads()
+{
+    try
+    {
+        Log::info("sys") << "before starting threads" << Log::end;
+#ifndef __MINGW32__
+        std::stringstream ss;
+        ss << std::this_thread::get_id();
+        uint64_t id = std::stoull(ss.str());
+        Log::info("sys") << "MAIN THREAD-ID: " << id << Log::end;
+#endif
+        m_pInThread = new std::thread(&CConnector::runConnector, this);
+#ifndef __MINGW32__
+        std::stringstream ssa;
+        ssa << m_pInThread->get_id();
+        id = std::stoull(ssa.str());
+        Log::info("sys") << "IN THREAD-ID: " << id << Log::end;
+#endif
+        m_pOutThread = new std::thread(&CConnector::runOut, this);
+#ifndef __MINGW32__
+        std::stringstream ssb;
+        ssb << m_pOutThread->get_id();
+        id = std::stoull(ssb.str());
+        Log::info("sys") << "OUT THREAD-ID: " << id << Log::end;
+#endif
+        Log::info("sys") << "after starting thread" << Log::end;
+    }
+    catch (const std::exception& _rException)
+    {
+        Log::fatal("threads") << "The threads couldn't be started" << Log::end;
+
+        return false;
+    }
+
+    return true;
+}
+
 bool CConnector::initConnection()
 {
     std::string content;
@@ -499,7 +546,8 @@ bool CConnector::initConnection()
     m_version = content.substr(pos, endPos - pos);
     m_version = "2015-04-01";
 
-    m_isConnecting = true;
+    setIsConnecting(true);
+//    m_isConnecting = true;
     m_pBaseConnector->lock();
     m_pBaseConnector->setConnectionState(ConnectionState_Connecting);
     m_pBaseConnector->unlock();
@@ -508,22 +556,22 @@ bool CConnector::initConnection()
         return false;
     }
 
-    Log::info("sys") << "before starting threads" << Log::end;
-#ifndef __MINGW32__
-    std::stringstream ss; ss << std::this_thread::get_id(); uint64_t id = std::stoull(ss.str());
-    Log::info("sys") << "MAIN THREAD-ID: " << id << Log::end;
-#endif
-    m_pInThread = new std::thread(&CConnector::runConnector, this);
-#ifndef __MINGW32__
-    std::stringstream ssa; ssa << m_pInThread->get_id(); id = std::stoull(ssa.str());
-    Log::info("sys") << "IN THREAD-ID: " << id << Log::end;
-#endif
-    m_pOutThread = new std::thread(&CConnector::runOut, this);
-#ifndef __MINGW32__
-    std::stringstream ssb; ssb << m_pOutThread->get_id(); id = std::stoull(ssb.str());
-    Log::info("sys") << "OUT THREAD-ID: " << id << Log::end;
-#endif
-    Log::info("sys") << "after starting thread" << Log::end;
+//    Log::info("sys") << "before starting threads" << Log::end;
+//#ifndef __MINGW32__
+//    std::stringstream ss; ss << std::this_thread::get_id(); uint64_t id = std::stoull(ss.str());
+//    Log::info("sys") << "MAIN THREAD-ID: " << id << Log::end;
+//#endif
+//    m_pInThread = new std::thread(&CConnector::runConnector, this);
+//#ifndef __MINGW32__
+//    std::stringstream ssa; ssa << m_pInThread->get_id(); id = std::stoull(ssa.str());
+//    Log::info("sys") << "IN THREAD-ID: " << id << Log::end;
+//#endif
+//    m_pOutThread = new std::thread(&CConnector::runOut, this);
+//#ifndef __MINGW32__
+//    std::stringstream ssb; ssb << m_pOutThread->get_id(); id = std::stoull(ssb.str());
+//    Log::info("sys") << "OUT THREAD-ID: " << id << Log::end;
+//#endif
+//    Log::info("sys") << "after starting thread" << Log::end;
 
     return true;
 }
@@ -536,10 +584,27 @@ void CConnector::runConnector()
     for (;;)
     {
         std::cout << "start" << std::endl;
-        if (connect())
+
+        ELoginRC loginRC = login();
+
+        switch (loginRC)
         {
-            Log::error("conn") << "connect() failed" << Log::end;
-            break;
+            case LoginRC_OK:
+                if (!connect())
+                {
+                    Log::error("conn") << "connect() failed" << Log::end;
+                }
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+                break;
+            case LoginRC_Unregistered:
+                setShutdown(true);
+                break;
+            case LoginRC_FailedAuth:
+                setShutdown(true);
+                break;
+            case LoginRC_InvalidResponse:
+                setShutdown(true);
+                break;
         }
 
         if (isShutdown())// && !m_reconnect.load())
@@ -559,7 +624,13 @@ void CConnector::runOut()
 
     for (;;)
     {
-        if (m_shutdown)
+        if (!isConnected() && !isShutdown())
+        {
+            std::unique_lock<std::mutex> lock(m_isConnectedMutex);
+            m_isConnectedCV.wait(lock);
+        }
+
+        if (isShutdown())
         {
             break;
         }
@@ -679,18 +750,17 @@ bool CConnector::connect()
     request.setProgressCallback(progressCallback, this);
     request.setWriteCallback(writeMessage, this);
 
-    m_isConnected = true;
-    m_isConnecting = false;
-
     if (request.execSync())
     {
-        m_isConnecting = false;
-        m_isConnected  = false;
+        setIsConnected(false);
+        setIsConnecting(false);
         return false;
     }
 
     if (!isShutdown())
     {
+        setIsConnected(false);
+        setIsConnecting(false);
         m_pBaseConnector->lock();
         m_pBaseConnector->setConnectionState(ConnectionState_Disconnected);
         m_pBaseConnector->unlock();
@@ -1247,6 +1317,8 @@ void CConnector::interpretInLine_semicolon(size_t _lineLength)
 
     if (_lineLength > 4094)
     {
+        setIsConnected(true);
+
         Message::SHearthbeat heartbeat;
         Message::SInitConnection initConnection;
 
@@ -1257,6 +1329,7 @@ void CConnector::interpretInLine_semicolon(size_t _lineLength)
         pushOut(initConnection);
         pushOut2("u%23%23#%0Au%23e%23");
         pushOut(heartbeat);
+        pushJob(Job::SLoadLoggedInPage());
 
         m_pBaseConnector->setConnectionState(ConnectionState_Connected);
     }
@@ -1351,6 +1424,27 @@ void CConnector::execHomeRequest(bool _sync, CConnector::SHomeRequestResult& _rR
     }
 }
 
+void CConnector::setIsConnected(bool _isConnected)
+{
+    m_isConnected = _isConnected;
+
+    if (_isConnected)
+    {
+        m_isConnectedCV.notify_one();
+        m_isConnecting = false;
+    }
+}
+
+void CConnector::setIsConnecting(bool _isConnecting)
+{
+    m_isConnecting = _isConnecting;
+
+    if (_isConnecting)
+    {
+        m_isConnected = false;
+    }
+}
+
 bool CConnector::isConnected() const
 {
     return m_isConnected;
@@ -1363,7 +1457,7 @@ bool CConnector::isConnecting() const
 
 void CConnector::setShutdown(bool _shutdown)
 {
-    m_shutdown = _shutdown;
+    m_shutdown.store(_shutdown);
 }
 
 bool CConnector::isShutdown() const
@@ -1429,6 +1523,11 @@ const char* CConnector::getSecret() const
     return &m_secret[0];
 }
 
+const std::string& CConnector::getCookie()
+{
+    return m_pCookie->getCookieString();
+}
+
 const std::string CConnector::getCookie(const std::string& _rString)
 {
     return m_pCookie->getCookie(_rString);
@@ -1484,6 +1583,14 @@ void CConnector::pushOut2(std::string&& _rMessage)
     m_outMessageMutex.lock();
     m_pOutQueue->push(std::move(_rMessage));
     m_outMessageMutex.unlock();
+}
+
+void CConnector::setSecret(const char* _pSecret)
+{
+    // TODO this could interfere with other threads... maybe a fix :D
+
+    assert(strlen(_pSecret) <= c_secretMaxLength);
+    strcpy(m_secret, _pSecret);
 }
 
 }

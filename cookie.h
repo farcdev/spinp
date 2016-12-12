@@ -38,7 +38,7 @@ public:
     void addCookie(const std::string& _rKey, std::string&& _rrValue);
     void addCookie(std::string&& _rrKey, std::string&& _rrValue);
 
-    std::string getCookie(const std::string& _rKey);
+    std::string getCookie(const std::string& _rKey) const;
 
     const std::string& getCookieString();
 

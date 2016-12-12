@@ -190,7 +190,7 @@ void CHttpRequest::setGetParameter(const std::string& _rKey, const std::string& 
 void CHttpRequest::setGetParameter(std::string&& _rrKey, std::string&& _rrValue)
 {
     auto it = m_getParameters.find(_rrKey);
-    if (it == m_getParameters.cend())
+    if (it != m_getParameters.cend())
     {
         it->second = std::move(_rrValue);
     }
@@ -208,7 +208,7 @@ void CHttpRequest::setPostParameter(const std::string& _rKey, const std::string&
 void CHttpRequest::setPostParameter(std::string&& _rrKey, std::string&& _rrValue)
 {
     auto it = m_postParameters.find(_rrKey);
-    if (it == m_postParameters.cend())
+    if (it != m_postParameters.cend())
     {
         it->second = std::move(_rrValue);
     }
@@ -226,7 +226,7 @@ void CHttpRequest::setHeader(const std::string& _rKey, const std::string& _rValu
 void CHttpRequest::setHeader(std::string&& _rrKey, std::string&& _rrValue)
 {
     auto it = m_headers.find(_rrKey);
-    if (it == m_headers.cend())
+    if (it != m_headers.cend())
     {
         it->second = std::move(_rrValue);
     }

@@ -89,6 +89,12 @@ private:
     virtual bool run(CConnector* _pConnector);
 };
 
+struct SLoadLoggedInPage : public SJob
+{
+private:
+    virtual bool run(CConnector* _pConnector);
+};
+
 class CJob
 {
 public:

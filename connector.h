@@ -100,6 +100,16 @@ public:
 //        InternJob_RequestBuddyImage,
 //    };
 
+private:
+
+    enum ELoginRC
+    {
+        LoginRC_OK              =  1,
+        LoginRC_FailedAuth      = -1,
+        LoginRC_Unregistered    = -2,
+        LoginRC_InvalidResponse = -3,
+    };
+
 public:
     CConnector(CBaseConnector* _pBaseConnector);
 //    CConnector(CCookie& _rCookie, CBaseConnector* _pBaseConnector);
@@ -109,7 +119,10 @@ public:
 
     bool start();
 
+private:
+    bool initThreads();
 
+public:
     bool initConnection();
     bool initLoggedIn();
     void runConnector();
@@ -122,6 +135,9 @@ public:
 
     bool isConnecting() const;
     bool isConnected() const;
+    void setIsConnected(bool _isConnected);
+    void setIsConnecting(bool _isConnecting);
+
     void setShutdown(bool _shutdown);
     bool isShutdown() const;
 
@@ -143,6 +159,7 @@ public:
 
     bool sendOut(const std::string& _rMessage);
 
+private:
     void interpretInLine(const std::string& _rLine);
     void interpretInLine_g();
     void interpretInLine_h();
@@ -154,6 +171,7 @@ public:
     void interpretInLine_biggerThan();
     void interpretInLine_semicolon(size_t _lineLength);
 
+public:
 
     bool isHeartbeating();
     void setHearthbeat(bool _state);
@@ -161,7 +179,9 @@ public:
     void setBaseConnector(CBaseConnector* _pBaseConnector);
     CBaseConnector* getBaseConnector();
     const char* getSecret() const;
+    void setSecret(const char* _pSecret);
 
+    const std::string& getCookie();
     const std::string getCookie(const std::string& _rString);
     void setUserInfo(const std::string& _rUserName, SUserInfo& _rUserInfo);
 //    void updateUserInfo(const std::string& _rUserName, const std::string& _rBuddyImageHash);
@@ -169,7 +189,7 @@ public:
     unsigned int getSemicolonCount();
 
 private:
-    bool login();
+    ELoginRC login();
 
 private:
     int getSndID();
@@ -209,6 +229,12 @@ private:
     TMixedJobQueue* m_pMixedJobQueueThreaded;
 //    TInternJobQueue* m_pInternJobQueueThreaded;
 
+//    std::atomic_bool m_isLoggedIn;
+//    std::atomic_bool m_isConnected;
+
+
+    std::mutex       m_isConnectedMutex;
+    std::condition_variable m_isConnectedCV;
     std::atomic_bool m_isConnected;
     std::atomic_bool m_isConnecting;
     std::atomic_bool m_heartBeats;
